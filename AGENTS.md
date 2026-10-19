@@ -30,6 +30,7 @@ Treat these documents as the shared source of truth for implementation, Sigma UI
 - Use strong compiler warnings and resolve warnings introduced by changed code.
 - Check all socket/system-call results and handle partial I/O, timeouts, disconnects and cleanup.
 - Bound buffers, request sizes, concurrent connections, metrics history and admin body sizes.
+- Use only the timeout values, connection limits, health thresholds and HTTP status codes from the Timeout and retry constants table (docs/architecture.md §5a), the HTTP status mapping table (docs/requirements.md §3) and the health thresholds (docs/architecture.md §4). Do not introduce different values without updating those tables first.
 - Avoid undefined behaviour, out-of-bounds access, unsafe string handling and unbounded allocation.
 - Synchronise shared backend state, in-flight counts, policy and metrics. Do not hold shared-state locks during network I/O.
 - Release the in-flight backend reservation on every success and failure path.

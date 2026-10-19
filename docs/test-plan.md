@@ -33,7 +33,7 @@ These are planned commands and have not been run while writing this document. If
 | Round robin | Three healthy backends, one unhealthy, all unavailable | Rotates through eligible servers and skips unavailable ones |
 | Least connections | Different in-flight counts, ties, concurrent reservations | Picks the lowest healthy count and uses deterministic tie-breaking |
 | Counters | Success, connect failure, timeout and client disconnect | Counters update correctly and active reservations are released exactly once |
-| Health state | Consecutive failures/successes at thresholds | State changes at the documented threshold; transient errors do not create uncontrolled oscillation |
+| Health state | Consecutive failures/successes at thresholds | State changes at exactly 3 consecutive failures (mark unhealthy) and 2 consecutive successes (recover); transient errors do not create uncontrolled oscillation. |
 | Metrics | Empty history, one sample, multiple samples, window expiry | Percentiles are correct or null when empty; retained history remains bounded |
 | Admin input | Valid/invalid policy JSON, missing field, wrong type, oversized body, unknown route | Correct status/error shape; invalid update leaves the policy unchanged |
 | JSON output | Strings containing quotes or control characters | JSON remains valid and strings are escaped safely |
