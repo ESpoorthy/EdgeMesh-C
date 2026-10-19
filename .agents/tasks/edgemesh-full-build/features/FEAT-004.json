@@ -2,7 +2,7 @@
   "id": "FEAT-004",
   "type": "feat",
   "description": "React + TypeScript dashboard. Depends on FEAT-001 and FEAT-002 (API must be defined; C build need not be running for TypeScript type-check). Creates a Vite react-ts project at dashboard/, implements three screens (Overview, Backend Health, Benchmark Lab), wires them to the C admin API endpoints from api-contract.md, and passes tsc --noEmit with zero errors. All live data comes from the API; no hardcoded mock values in production screens.",
-  "status": "pending",
+  "status": "completed",
   "steps": [
     "Bootstrap the Vite project: from Windows PowerShell run: cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh && npm create vite@latest dashboard -- --template react-ts --yes\" . Then run: cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npm install\". Verify dashboard/package.json and dashboard/src/main.tsx exist.",
 
@@ -45,5 +45,5 @@
     "cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npx tsc --noEmit 2>&1\""
   ],
   "blocked_reason": null,
-  "findings": ""
+  "findings": "npm install: 28 packages added, 0 vulnerabilities (--legacy-peer-deps required due to Vite 8 / React 19 / TS 7 resolution issue with npm 10.8.2). tsc --noEmit: exit 0, zero errors. All acceptance criteria verified by code review."
 }
