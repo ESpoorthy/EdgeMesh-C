@@ -144,3 +144,11 @@ add_executable(test_admin
 )
 target_link_libraries(test_admin PRIVATE pthread m)
 add_test(NAME test_admin COMMAND test_admin)
+
+# integration_smoke — end-to-end shell test (requires loopback network, ~60 s)
+add_test(
+    NAME integration_smoke
+    COMMAND bash ${CMAKE_SOURCE_DIR}/tests/integration_smoke.sh
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+set_tests_properties(integration_smoke PROPERTIES TIMEOUT 150)

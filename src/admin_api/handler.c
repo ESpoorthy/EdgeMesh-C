@@ -171,9 +171,12 @@ static void send_preflight(int fd, const char *origin_echo) {
 /* -----------------------------------------------------------------------
  * Internal: read the request body up to ADMIN_MAX_BODY_SIZE.
  * Content-Length is obtained from the parsed request headers.
+ * hdr_buf/hdr_len: the buffer already read by read_with_timeout, which
+ * may contain body bytes that follow the \r\n\r\n header boundary.
  * Returns bytes read, -1 on error, -413 if body exceeds limit.
  * ----------------------------------------------------------------------- */
 static ssize_t read_body(int fd, const http_request_t *req,
+                         const char *hdr_buf, size_t hdr_len,
                          char *body_buf, size_t body_bufsz) {
     const char *cl_val = find_header(req, "Content-Length");
     if (cl_val[0] == '\0') {
@@ -196,6 +199,27 @@ static ssize_t read_body(int fd, const http_request_t *req,
     }
 
     size_t total = 0;
+
+    /* Copy any body bytes already buffered in hdr_buf after \r\n\r\n. */
+    const char *sep = NULL;
+    for (size_t i = 0; i + 3 < hdr_len; i++) {
+        if (hdr_buf[i]   == '\r' && hdr_buf[i+1] == '\n' &&
+            hdr_buf[i+2] == '\r' && hdr_buf[i+3] == '\n') {
+            sep = hdr_buf + i + 4;
+            break;
+        }
+    }
+    if (sep != NULL) {
+        size_t available = (size_t)(hdr_buf + hdr_len - sep);
+        size_t to_copy   = available < (size_t)content_len
+                           ? available : (size_t)content_len;
+        if (to_copy > 0) {
+            memcpy(body_buf, sep, to_copy);
+            total = to_copy;
+        }
+    }
+
+    /* Read remaining bytes from the socket. */
     while (total < (size_t)content_len) {
         fd_set rset;
         FD_ZERO(&rset);
@@ -273,16 +297,72 @@ void handle_admin_request(int client_fd) {
         return;
     }
 
-    /* Parse the request. */
+    /* Parse the request.
+     * The shared HTTP parser only accepts GET; the admin API also accepts PUT
+     * and OPTIONS.  When the parser returns PARSE_METHOD_NOT_ALLOWED we
+     * attempt a minimal manual parse of the first line so we can dispatch
+     * correctly.
+     */
     http_request_t req;
     memset(&req, 0, sizeof(req));
     parse_result_t pr = parse_request(hdr_buf, (size_t)hlen, &req);
+
+    /* If the parser rejected the method, try to extract it manually. */
+    if (pr == PARSE_METHOD_NOT_ALLOWED) {
+        /* hdr_buf starts with "METHOD SP target SP version\r\n…" */
+        const char *sp = (const char *)memchr(hdr_buf, ' ', (size_t)hlen);
+        if (sp != NULL) {
+            size_t mlen = (size_t)(sp - hdr_buf);
+            if (mlen < sizeof(req.method)) {
+                memcpy(req.method, hdr_buf, mlen);
+                req.method[mlen] = '\0';
+            }
+            /* Extract target (between first and second space). */
+            const char *t_start = sp + 1;
+            const char *sp2 = (const char *)memchr(t_start, ' ',
+                                  (size_t)(hdr_buf + hlen - t_start));
+            if (sp2 != NULL) {
+                size_t tlen = (size_t)(sp2 - t_start);
+                if (tlen < sizeof(req.target)) {
+                    memcpy(req.target, t_start, tlen);
+                    req.target[tlen] = '\0';
+                }
+            }
+            /* Re-parse headers from the remainder so find_header() works. */
+            /* We only need Origin; do a lightweight manual scan. */
+            const char *hl = strstr(hdr_buf, "\r\n");
+            if (hl) {
+                hl += 2; /* skip request line CRLF */
+                /* Reuse the parser on a synthetic GET line + rest of headers
+                 * so req.headers is populated correctly. */
+                char fake_buf[ADMIN_MAX_HEADER_SIZE];
+                int flen = snprintf(fake_buf, sizeof(fake_buf),
+                                    "GET %s HTTP/1.1\r\n%s",
+                                    req.target[0] ? req.target : "/",
+                                    hl);
+                if (flen > 0 && (size_t)flen < sizeof(fake_buf)) {
+                    http_request_t fake_req;
+                    memset(&fake_req, 0, sizeof(fake_req));
+                    if (parse_request(fake_buf, (size_t)flen, &fake_req)
+                            == PARSE_OK) {
+                        /* Copy header array; keep method/target we set. */
+                        req.header_count = fake_req.header_count;
+                        memcpy(req.headers, fake_req.headers,
+                               (size_t)fake_req.header_count
+                               * sizeof(http_header_t));
+                    }
+                }
+            }
+            /* Treat as successfully parsed for routing purposes. */
+            pr = PARSE_OK;
+        }
+    }
 
     /* Determine matched CORS origin. */
     const char *origin     = find_header(&req, "Origin");
     const char *origin_echo = match_cors_origin(origin);
 
-    /* Handle parse failures for admin API (relaxed: accept PUT too). */
+    /* Handle parse failures for admin API. */
     if (pr == PARSE_BAD_REQUEST) {
         const char *err =
             "{\"error\":{\"code\":\"BAD_REQUEST\","
@@ -416,8 +496,10 @@ void handle_admin_request(int client_fd) {
             return;
         }
 
-        /* Read body. */
-        ssize_t blen = read_body(client_fd, &req, body_buf, sizeof(body_buf));
+        /* Read body (pass hdr_buf/hlen so already-buffered body bytes are used). */
+        ssize_t blen = read_body(client_fd, &req,
+                                 hdr_buf, (size_t)hlen,
+                                 body_buf, sizeof(body_buf));
         if (blen == -413) {
             const char *err =
                 "{\"error\":{\"code\":\"BODY_TOO_LARGE\","
