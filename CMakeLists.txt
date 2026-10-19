@@ -133,10 +133,11 @@ add_executable(test_metrics
 target_link_libraries(test_metrics PRIVATE pthread m)
 add_test(NAME test_metrics COMMAND test_metrics)
 
-# test_admin (stub — full tests in FEAT-002)
+# test_admin
 add_executable(test_admin
     tests/test_admin.c
     $<TARGET_OBJECTS:admin_api_obj>
+    $<TARGET_OBJECTS:http_obj>
     $<TARGET_OBJECTS:backend_obj>
     $<TARGET_OBJECTS:metrics_obj>
     $<TARGET_OBJECTS:common_obj>

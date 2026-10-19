@@ -4,6 +4,15 @@
 #include <stddef.h>
 
 /*
+ * json_builder_set_exe_path(path)
+ *
+ * Must be called once from main() with argv[0] so that
+ * json_build_benchmark_latest() can resolve results/latest.json
+ * relative to the executable's own directory (not getcwd()).
+ */
+void json_builder_set_exe_path(const char *path);
+
+/*
  * json_escape_string(in, out, out_size)
  *
  * Copies in into out, escaping characters that are not safe in a JSON string:
