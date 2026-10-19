@@ -85,6 +85,33 @@ void metrics_record_request(int success, uint64_t bytes, double latency_ms) {
 }
 
 /* --------------------------------------------------------------------- */
+/* Public: metrics_record_client_reject                                    */
+/* --------------------------------------------------------------------- */
+/*
+ * Called when a client request is rejected before any backend is selected.
+ * Increments requests_total and decrements active_requests to keep the
+ * in-flight count balanced, but does NOT increment proxy_failures_total
+ * because no backend attempt was made.
+ */
+void metrics_record_client_reject(double latency_ms) {
+    pthread_mutex_lock(&s_mutex);
+
+    s_m.requests_total++;
+    if (s_m.active_requests > 0) {
+        s_m.active_requests--;
+    }
+
+    /* Push latency sample into ring buffer (wrap on overflow). */
+    s_m.latency_ring[s_m.ring_head] = latency_ms;
+    s_m.ring_head = (s_m.ring_head + 1) % LATENCY_RING_SIZE;
+    if (s_m.ring_count < LATENCY_RING_SIZE) {
+        s_m.ring_count++;
+    }
+
+    pthread_mutex_unlock(&s_mutex);
+}
+
+/* --------------------------------------------------------------------- */
 /* Public: metrics_tick — called by the 1-second timer thread             */
 /* --------------------------------------------------------------------- */
 void metrics_tick(void) {
@@ -189,11 +216,25 @@ metrics_t metrics_get_snapshot(void) {
     snap.p95_ms = metrics_percentile(95.0);
     snap.p99_ms = metrics_percentile(99.0);
 
-    /* Fill rates from the last time-series point, if available. */
-    if (snap.series_count > 0) {
-        const time_series_point_t *last = &snap.series[snap.series_count - 1];
-        snap.requests_per_second       = last->requests_per_second;
-        snap.response_bytes_per_second = last->response_bytes_per_second;
+    /* Compute rates as a rolling window average over all series points.
+     * Each time_series_point_t.requests_per_second holds the 1-second
+     * delta for that tick.  Summing all deltas and dividing by the
+     * number of points gives the average requests/second over the window,
+     * as required by api-contract §9 ("rolling window of per-second
+     * buckets over sample_window_seconds").  Return 0.0 when <2 complete
+     * buckets have been recorded (spec requirement). */
+    if (snap.series_count >= 2) {
+        double rps_sum  = 0.0;
+        double bps_sum  = 0.0;
+        for (int i = 0; i < snap.series_count; i++) {
+            rps_sum += snap.series[i].requests_per_second;
+            bps_sum += snap.series[i].response_bytes_per_second;
+        }
+        snap.requests_per_second       = rps_sum / (double)snap.series_count;
+        snap.response_bytes_per_second = bps_sum / (double)snap.series_count;
+    } else {
+        snap.requests_per_second       = 0.0;
+        snap.response_bytes_per_second = 0.0;
     }
 
     return snap;

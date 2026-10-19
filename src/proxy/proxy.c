@@ -419,7 +419,19 @@ cleanup:
     {
         uint64_t end_ms     = monotonic_ms();
         double   latency_ms = (double)(end_ms - start_ms);
-        metrics_record_request(success, bytes_forwarded, latency_ms);
+
+        /*
+         * Only record a backend-level outcome (which affects
+         * proxy_failures_total) when a backend was actually selected.
+         * Paths that reject the client before backend selection
+         * (header read timeout, parse errors) are client-side events
+         * and must not inflate proxy_failures_total.
+         */
+        if (backend_reserved) {
+            metrics_record_request(success, bytes_forwarded, latency_ms);
+        } else {
+            metrics_record_client_reject(latency_ms);
+        }
 
         if (backend_fd >= 0) {
             close(backend_fd);

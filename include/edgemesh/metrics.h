@@ -42,15 +42,29 @@ void metrics_init(void);
 /*
  * metrics_record_request(success, bytes, latency_ms)
  *
- * Called from the proxy worker on completion of a proxied request.
+ * Called from the proxy worker after a backend attempt completes.
  * success == 1: increment responses_forwarded_total and add bytes.
- * success == 0: increment proxy_failures_total.
+ * success == 0: increment proxy_failures_total (backend-level failure only).
  * latency_ms: pushed into the latency ring buffer.
  * active_requests is decremented after the request completes.
  * NEVER holds the lock during network I/O.
  * Health-probe traffic must NOT call this function.
+ * Client-side rejections (no backend attempted) must use
+ * metrics_record_client_reject() instead to avoid inflating
+ * proxy_failures_total with non-proxy events.
  */
 void metrics_record_request(int success, uint64_t bytes, double latency_ms);
+
+/*
+ * metrics_record_client_reject(latency_ms)
+ *
+ * Called when a client request is rejected before any backend is selected
+ * (e.g., parse error, header timeout, oversized headers).
+ * Increments requests_total and decrements active_requests, but does NOT
+ * increment proxy_failures_total because no backend attempt was made.
+ * latency_ms is pushed into the latency ring buffer.
+ */
+void metrics_record_client_reject(double latency_ms);
 
 /*
  * metrics_record_request_start()
