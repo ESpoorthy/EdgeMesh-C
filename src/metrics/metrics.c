@@ -93,10 +93,15 @@ void metrics_tick(void) {
     char ts[24];
     rfc3339_now(ts, sizeof(ts));
 
-    /* Compute per-second rates from delta (need at least 2 ticks). */
+    /*
+     * Compute per-second rates from delta.
+     * The spec requires 0.0 when fewer than 2 complete buckets exist,
+     * so we need ticks_done >= 2 (the first tick establishes the baseline,
+     * the second tick can compute a meaningful one-second delta).
+     */
     double rps   = 0.0;
     double bps   = 0.0;
-    if (s_m.ticks_done >= 1) {
+    if (s_m.ticks_done >= 2) {
         uint64_t req_delta   = s_m.requests_total - s_m.prev_requests_total;
         uint64_t bytes_delta = s_m.response_bytes_total - s_m.prev_bytes_total;
         rps  = (double)req_delta;
@@ -107,24 +112,42 @@ void metrics_tick(void) {
     s_m.prev_bytes_total    = s_m.response_bytes_total;
     s_m.ticks_done++;
 
-    /* Build the time-series point. */
-    time_series_point_t *pt = &s_m.series[s_m.series_head];
-    memset(pt, 0, sizeof(*pt));
-    strncpy(pt->timestamp, ts, sizeof(pt->timestamp) - 1);
-    pt->requests_total              = s_m.requests_total;
-    pt->responses_forwarded_total   = s_m.responses_forwarded_total;
-    pt->proxy_failures_total        = s_m.proxy_failures_total;
-    pt->requests_per_second         = rps;
-    pt->response_bytes_per_second   = bps;
-    pt->active_requests             = (uint64_t)s_m.active_requests;
+    /* Snapshot counter values for the time-series point while locked. */
+    uint64_t snap_req_total   = s_m.requests_total;
+    uint64_t snap_fwd_total   = s_m.responses_forwarded_total;
+    uint64_t snap_fail_total  = s_m.proxy_failures_total;
+    uint64_t snap_active      = (uint64_t)s_m.active_requests;
+    int      series_head      = s_m.series_head;
 
-    /* Advance rotating write head. */
+    /* Advance rotating write head before releasing lock. */
     s_m.series_head = (s_m.series_head + 1) % TIME_SERIES_MAX;
     if (s_m.series_count < TIME_SERIES_MAX) {
         s_m.series_count++;
     }
 
     pthread_mutex_unlock(&s_mutex);
+
+    /*
+     * Compute latency percentiles without holding the lock
+     * (metrics_percentile() acquires its own lock internally).
+     */
+    double p50 = metrics_percentile(50.0);
+    double p95 = metrics_percentile(95.0);
+    double p99 = metrics_percentile(99.0);
+
+    /* Build the time-series point (no lock needed — we own this slot). */
+    time_series_point_t *pt = &s_m.series[series_head];
+    memset(pt, 0, sizeof(*pt));
+    strncpy(pt->timestamp, ts, sizeof(pt->timestamp) - 1);
+    pt->requests_total              = snap_req_total;
+    pt->responses_forwarded_total   = snap_fwd_total;
+    pt->proxy_failures_total        = snap_fail_total;
+    pt->requests_per_second         = rps;
+    pt->response_bytes_per_second   = bps;
+    pt->active_requests             = snap_active;
+    pt->latency_p50_ms              = p50;
+    pt->latency_p95_ms              = p95;
+    pt->latency_p99_ms              = p99;
 }
 
 /* --------------------------------------------------------------------- */

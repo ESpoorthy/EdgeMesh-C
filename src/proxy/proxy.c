@@ -131,9 +131,18 @@ static int connect_with_timeout(const char *addr, int port, int timeout_ms) {
     return fd;
 }
 
+/*
+ * Sentinel return values for forward_response:
+ *   >= 0  : bytes forwarded (success)
+ *   FWD_ERR_TIMEOUT   (-1) : backend read timeout → caller sends 504
+ *   FWD_ERR_INVALID   (-2) : invalid/incomplete upstream response → caller sends 502
+ */
+#define FWD_ERR_TIMEOUT  (-1)
+#define FWD_ERR_INVALID  (-2)
+
 /* -----------------------------------------------------------------------
  * Internal: read backend response headers, then forward the full response.
- * Returns bytes forwarded (>= 0) or -1 on error.
+ * Returns bytes forwarded (>= 0), FWD_ERR_TIMEOUT, or FWD_ERR_INVALID.
  * ----------------------------------------------------------------------- */
 static ssize_t forward_response(int client_fd, int backend_fd) {
     /* Read backend response headers (bounded 16 KiB). */
@@ -141,17 +150,21 @@ static ssize_t forward_response(int client_fd, int backend_fd) {
     ssize_t hlen = read_with_timeout(backend_fd, resp_buf, sizeof(resp_buf),
                                      BACKEND_READ_TIMEOUT_MS);
     if (hlen <= 0) {
-        return -1;
+        /* read_with_timeout returns -ETIMEDOUT on timeout, or other negative
+         * on I/O error. Either way the backend did not deliver a response
+         * within the deadline → treat as gateway timeout (504). */
+        return FWD_ERR_TIMEOUT;
     }
 
     /* Validate: must start with "HTTP/". */
     if (hlen < 5 || strncmp(resp_buf, "HTTP/", 5) != 0) {
-        return -1;
+        /* Data arrived but is not a valid HTTP response → 502. */
+        return FWD_ERR_INVALID;
     }
 
     /* Forward header section. */
     ssize_t fw = write_all(client_fd, resp_buf, (size_t)hlen);
-    if (fw < 0) return -1;
+    if (fw < 0) return FWD_ERR_INVALID;
     ssize_t total_bytes = fw;
 
     /* Forward remaining body in streaming chunks. */
@@ -230,10 +243,10 @@ static void *proxy_worker_thread(void *arg) {
                         "\"message\":\"only GET is supported\"}}";
                     break;
                 case PARSE_URI_TOO_LONG:
-                    status      = 414;
-                    status_text = "URI Too Long";
+                    status      = 400;
+                    status_text = "Bad Request";
                     err_body    =
-                        "{\"error\":{\"code\":\"URI_TOO_LONG\","
+                        "{\"error\":{\"code\":\"BAD_REQUEST\","
                         "\"message\":\"request URI too long\"}}";
                     break;
                 case PARSE_HEADER_TOO_LARGE:
@@ -373,11 +386,18 @@ static void *proxy_worker_thread(void *arg) {
          * Step 6: forward backend response to client
          * -------------------------------------------------------------- */
         ssize_t fb = forward_response(client_fd, backend_fd);
-        if (fb < 0) {
-            /* Headers never received — count as proxy failure. */
+        if (fb == FWD_ERR_TIMEOUT) {
+            /* Backend did not send a response within the deadline. */
             send_error_response(client_fd, 504,
                 "{\"error\":{\"code\":\"BACKEND_READ_TIMEOUT\","
                 "\"message\":\"backend did not respond in time\"}}");
+            goto cleanup;
+        }
+        if (fb == FWD_ERR_INVALID) {
+            /* Backend connected but returned an invalid/incomplete response. */
+            send_error_response(client_fd, 502,
+                "{\"error\":{\"code\":\"INVALID_UPSTREAM_RESPONSE\","
+                "\"message\":\"backend returned an invalid response\"}}");
             goto cleanup;
         }
 

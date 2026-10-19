@@ -382,17 +382,21 @@ char *json_build_metrics(int window_s) {
             "      \"responses_forwarded_total\": %llu,\n"
             "      \"proxy_failures_total\": %llu,\n"
             "      \"requests_per_second\": %.3f,\n"
-            "      \"response_bytes_per_second\": %.3f,\n"
-            "      \"latency_p50_ms\": null,\n"
-            "      \"latency_p95_ms\": null,\n"
-            "      \"latency_p99_ms\": null\n"
-            "    }%s\n",
+            "      \"response_bytes_per_second\": %.3f,\n",
             ets,
             (unsigned long long)pt->requests_total,
             (unsigned long long)pt->responses_forwarded_total,
             (unsigned long long)pt->proxy_failures_total,
             pt->requests_per_second,
-            pt->response_bytes_per_second,
+            pt->response_bytes_per_second);
+
+        buf_appendf(buf, sizeof(buf), &pos, "      \"latency_p50_ms\": ");
+        buf_append_double_or_null(buf, sizeof(buf), &pos, pt->latency_p50_ms);
+        buf_appendf(buf, sizeof(buf), &pos, ",\n      \"latency_p95_ms\": ");
+        buf_append_double_or_null(buf, sizeof(buf), &pos, pt->latency_p95_ms);
+        buf_appendf(buf, sizeof(buf), &pos, ",\n      \"latency_p99_ms\": ");
+        buf_append_double_or_null(buf, sizeof(buf), &pos, pt->latency_p99_ms);
+        buf_appendf(buf, sizeof(buf), &pos, "\n    }%s\n",
             (i < snap.series_count - 1) ? "," : "");
     }
 

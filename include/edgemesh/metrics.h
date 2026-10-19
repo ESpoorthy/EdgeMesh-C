@@ -16,6 +16,9 @@ typedef struct {
     double   requests_per_second;    /* 0.0 if <2 complete buckets */
     double   response_bytes_per_second; /* 0.0 if <2 complete buckets */
     uint64_t active_requests;
+    double   latency_p50_ms;         /* NAN if no samples at tick time */
+    double   latency_p95_ms;         /* NAN if no samples at tick time */
+    double   latency_p99_ms;         /* NAN if no samples at tick time */
 } time_series_point_t;
 
 /* Snapshot of all metrics for the admin API. */
