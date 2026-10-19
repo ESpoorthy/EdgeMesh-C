@@ -15,7 +15,7 @@ This document is the contract between the C admin API and React + TypeScript. Fi
 - Timestamps use RFC 3339 UTC, e.g. 2026-10-19T05:30:00Z. Unavailable timestamps are null.
 - Durations ending in _ms are milliseconds; rates ending in _per_second are per second.
 - Counters are non-negative integers. Percentiles are numbers or null when no valid samples exist.
-- Unknown route: 404. Unsupported method: 405. Malformed JSON/invalid values: 400. Oversized body: 413. Internal error: 500.
+- Unknown route: 404. Unsupported method: 405. Malformed JSON/invalid values: 400. Oversized body: 413. Internal error: 500. For the complete proxy and admin HTTP status mapping, see the HTTP status mapping table in docs/requirements.md.
 - CORS must never use wildcard origin. For an allowed browser origin return that exact origin and Vary: Origin. Support OPTIONS preflight for API routes.
 - CORS is not authentication. This is a local educational prototype, not a production security boundary.
 
@@ -186,12 +186,16 @@ When a run exists:
       }
     }
 
-All benchmark numbers above are example schema values, not measured or promised performance. Persisted values must come from an actual completed run. The API reads only a fixed documented result path; it must never accept an arbitrary path from the caller. If persisted data is invalid or unreadable, return a safe 500 error and log the internal reason.
+All benchmark numbers above are example schema values, not measured or promised performance. Persisted values must come from an actual completed run. The API reads only results/latest.json, resolved from the executable path at startup, never from the process working directory, and never from a caller-supplied path. If persisted data is invalid or unreadable, return a safe 500 error and log the internal reason.
 
 ## 9. Metric definitions
 
 - p50/p95/p99 are computed from completed request latency samples in the documented interval; with no samples return null.
 - response_bytes_per_second measures response bytes forwarded by the proxy divided by the observation interval. Document consistently whether headers are counted.
+- requests_per_second and response_bytes_per_second are calculated using a rolling window of per-second buckets over sample_window_seconds (default 60 s). If fewer than 2 complete buckets exist (e.g. at startup or during low traffic), return 0.0 — rates are never null (unlike percentiles which return null when no samples exist).
+- Health-probe traffic does NOT contribute to proxy metrics. Only client-originated requests forwarded through the proxy are counted.
+- If a partial upstream response (headers received but body truncated) begins forwarding to the client then the connection drops: responses_forwarded_total is incremented (the response was forwarded, even if truncated) and bytes_forwarded counts only bytes actually written to the client.
+- If upstream response headers are never received (connect timeout, read timeout, or invalid status line): proxy_failures_total is incremented; responses_forwarded_total is not incremented.
 - Benchmark duration is wall-clock time from the first dispatched request until the run completes.
 - Benchmark requests_per_second is completed requests divided by that duration.
 - Record requested, completed and failed counts separately.

@@ -66,7 +66,7 @@ The exact file split may evolve, but API and module contracts must remain consis
 8. Close sockets and release the in-flight reservation on every success and failure path.
 9. Record outcome, response bytes and latency, then write a structured log entry.
 
-This is not a complete HTTP implementation. The MVP is one request per client connection with connection-close behaviour. Request bodies, chunked request bodies, upgrades, CONNECT and persistent connections are excluded.
+This is not a complete HTTP implementation. The MVP is one request per client connection with connection-close behaviour. Request bodies, chunked request bodies, upgrades, CONNECT and persistent connections are excluded. For the HTTP status code returned at each failure point, see the HTTP status mapping table in docs/requirements.md.
 
 ## 4. Backend state and selection
 
@@ -80,6 +80,10 @@ The selector and in-flight reservation must share a synchronisation strategy so 
 
 Health checks run in a worker or equivalent scheduled mechanism. They use bounded timeouts and configurable thresholds; a single transient probe failure must not necessarily remove a backend immediately.
 
+#### Health thresholds
+
+Consecutive failures to mark a backend unhealthy: **3**. Consecutive successes to recover a backend to healthy: **2**. Probe interval: **5 s**. A transient single probe failure does not immediately remove a backend from service.
+
 ## 5. Concurrency and resource limits
 
 A bounded pthread worker model is sufficient for the MVP. Proxy work, health probes and admin requests must not block one another indefinitely.
@@ -87,9 +91,24 @@ A bounded pthread worker model is sufficient for the MVP. Proxy work, health pro
 - Protect backend state, active counts, selected policy and metrics with scoped mutexes or equivalent.
 - Do not hold shared-state locks while waiting on socket I/O.
 - Define an explicit maximum active connection count and predictable overload behaviour.
+- Maximum concurrent proxy connections: **128**; when this limit is reached, new client connections are accepted and immediately receive HTTP 503 then closed. Maximum concurrent admin connections: **16**; excess connections are accepted and immediately receive HTTP 503 then closed.
 - Bound all buffers, request sizes, latency sample storage and time-series history.
 - Handle signals and shut down listeners/workers cleanly.
 - Keep a single, auditable cleanup path for sockets, buffers and in-flight reservations.
+
+## 5a. Timeout and retry constants
+
+| Constant | Value |
+|---|---|
+| Client read timeout (request headers) | 10 s |
+| Backend connect timeout | 5 s |
+| Backend read timeout (response headers) | 10 s |
+| Overall per-request deadline | 20 s |
+| Health probe connect timeout | 3 s |
+| Health probe read timeout | 3 s |
+| Admin request read timeout | 10 s |
+
+Retry policy: no retry on failure; each request makes exactly one attempt to each backend. See the HTTP status mapping in docs/requirements.md for the status code returned when each timeout fires.
 
 ## 6. Admin API and dashboard
 
@@ -101,7 +120,7 @@ The admin API exposes only the six endpoints in api-contract.md. The policy endp
 - Permit only http://localhost:5173 and http://127.0.0.1:5173 through browser CORS.
 - Do not treat CORS as authentication; local processes can make direct requests to a loopback service.
 
-The benchmark tool saves actual results locally. The API reads only a fixed, documented result location and returns an explicit unavailable state if no completed run exists.
+The benchmark tool saves actual results to results/latest.json, resolved relative to the repository root by deriving the path from the executable's own path at startup (not from the process working directory). The admin API reads only that fixed path — results/latest.json relative to the same executable-derived root — and never accepts a caller-supplied path.
 
 The dashboard polls at two-second intervals, cleans up requests/timers when screens unmount, and renders loading, error, disconnected and empty states. Every integrated live metric must come from the API, not hardcoded mock values.
 
