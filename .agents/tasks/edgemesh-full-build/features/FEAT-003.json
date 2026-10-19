@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Integration end-to-end smoke test and README. Depends on FEAT-001 and FEAT-002 (all C binaries must build). This FEAT adds a shell-based integration smoke test script (tests/integration_smoke.sh) that exercises INT-01 through INT-10 from the test plan using the actual built binaries, plus a complete README.md with build/run/test instructions. No new C source — this is verification and documentation.",
+  "status": "pending",
+  "steps": [
+    "Write tests/integration_smoke.sh: bash script that (1) starts three demo_backend processes on 9001/9002/9003, (2) starts edgemesh, (3) waits 2 seconds for health probes to complete, (4) sends 6 sequential curl GET requests to http://127.0.0.1:8080/ and verifies each returns 200 and 'Backend at port', (5) checks that over 6 requests all three backends appear in responses (round_robin), (6) sends a PUT to http://127.0.0.1:9090/api/v1/policy with body '{\"policy\":\"least_connections\"}' and verifies 200 response, (7) sends an invalid PUT with body '{\"policy\":\"bad_value\"}' and verifies 400 response, (8) calls all six GET admin endpoints and verifies each returns HTTP 200 and valid JSON (using python3 -m json.tool or jq), (9) kills one demo_backend and waits for health check interval + threshold (18s = 3 failures * 5s probe interval + buffer) then verifies GET /api/v1/backends shows that backend as 'unhealthy', (10) sends a request to 8080 and verifies other backends still serve, (11) kills all demo_backends and verifies HTTP 503 from proxy, (12) restarts demo_backends and waits for recovery then verifies healthy again. Script exits 0 on all pass, 1 on any failure. Prints PASS/FAIL for each check.",
+
+    "Add the integration test to CMakeLists.txt as a CTest test: add_test(NAME integration_smoke COMMAND bash ${CMAKE_SOURCE_DIR}/tests/integration_smoke.sh WORKING_DIRECTORY ${CMAKE_BINARY_DIR}). Mark it with set_tests_properties(integration_smoke PROPERTIES TIMEOUT 120).",
+
+    "Overwrite README.md with complete documentation: project description, prerequisites (WSL Ubuntu 22.04, GCC, CMake, Node.js 20), exact build commands (cmake configure + build + ctest), exact run commands (start 3 demo backends, start edgemesh, dashboard dev server), exact benchmark command example, exact curl examples for every admin endpoint, known limitations (HTTP/1.1 subset only, no TLS, no persistent connections, loopback only, educational prototype), and link to docs/."
+  ],
+  "acceptance_criteria": [
+    "tests/integration_smoke.sh is executable and passes when all three demo backends and edgemesh are running",
+    "README.md contains build, run, test, and benchmark instructions that match the actual CMake targets and binary names",
+    "ctest --test-dir build --output-on-failure -R integration_smoke passes (requires network access to loopback)"
+  ],
+  "verification": [
+    "wsl -e bash -c \"cd /mnt/c/Users/HARI/Downloads/flutter/edgemesh && cmake --build build --parallel && ctest --test-dir build --output-on-failure -R integration_smoke 2>&1\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

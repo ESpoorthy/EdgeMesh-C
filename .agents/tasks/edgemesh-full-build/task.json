@@ -1,0 +1,7 @@
+{
+  "task_id": "task-edgemesh-full-build",
+  "task_description": "Build EdgeMesh-C from scratch: C17 HTTP reverse proxy with round-robin and least-connections load balancing, health checks, admin JSON API, metrics, benchmark client, and React+TypeScript dashboard. Workspace has docs only; all source must be created.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004"],
+  "blocked_reason": null
+}

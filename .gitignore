@@ -53,3 +53,13 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# Build directory
+build/
+
+# Benchmark results (runtime-generated, never committed)
+results/*.json
+results/*.csv
+
+# Dashboard dependencies
+dashboard/node_modules/

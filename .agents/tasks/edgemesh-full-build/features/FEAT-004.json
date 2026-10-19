@@ -1,0 +1,49 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "React + TypeScript dashboard. Depends on FEAT-001 and FEAT-002 (API must be defined; C build need not be running for TypeScript type-check). Creates a Vite react-ts project at dashboard/, implements three screens (Overview, Backend Health, Benchmark Lab), wires them to the C admin API endpoints from api-contract.md, and passes tsc --noEmit with zero errors. All live data comes from the API; no hardcoded mock values in production screens.",
+  "status": "pending",
+  "steps": [
+    "Bootstrap the Vite project: from Windows PowerShell run: cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh && npm create vite@latest dashboard -- --template react-ts --yes\" . Then run: cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npm install\". Verify dashboard/package.json and dashboard/src/main.tsx exist.",
+
+    "Create dashboard/src/api/client.ts: typed API client with the base URL http://127.0.0.1:9090. Export typed fetch wrappers for each endpoint mirroring the schemas in api-contract.md: getHealth() -> HealthResponse, getOverview() -> OverviewResponse, getBackends() -> BackendsResponse, putPolicy(policy: string) -> PolicyResponse, getMetrics(window_seconds?: number) -> MetricsResponse, getBenchmarkLatest() -> BenchmarkLatestResponse. All functions return Promise<T> and throw typed ApiError on non-2xx. Export the full TypeScript interfaces for each response type — field names and types MUST match api-contract.md exactly (e.g. latency_p50_ms: number | null, state: 'healthy' | 'unhealthy' | 'unknown').",
+
+    "Create dashboard/src/hooks/usePolling.ts: custom hook usePolling<T>(fetchFn, intervalMs) that calls fetchFn every intervalMs milliseconds, returns {data, loading, error, lastUpdated}. Clears the interval on unmount. On fetch error sets error state and keeps last known data. intervalMs minimum enforced at 2000ms.",
+
+    "Create dashboard/src/components/StatusBadge.tsx: displays backend state ('healthy' -> green, 'unhealthy' -> red, 'unknown' -> gray) as a styled inline badge. Accessible: uses role='status' and aria-label.",
+
+    "Create dashboard/src/components/MetricCard.tsx: displays a single metric (label + value + optional unit). Renders a loading skeleton when value is undefined/null. Accessible: uses appropriate aria-label.",
+
+    "Create dashboard/src/components/ErrorBanner.tsx: displays an error or disconnected state banner with a retry button. Visible when the API is unreachable.",
+
+    "Create dashboard/src/pages/Overview.tsx: polls GET /api/v1/overview every 2s using usePolling. Renders: proxy status (running/stopped), current policy, uptime, backend summary (total/healthy/unhealthy/unknown counts), and all metrics fields (requests_total, responses_forwarded_total, proxy_failures_total, requests_per_second, response_bytes_per_second, active_requests, latency_p50_ms, latency_p95_ms, latency_p99_ms). Shows loading skeleton on first load. Shows ErrorBanner when fetch fails. Shows policy change control: a select element with options round_robin / least_connections, a Submit button that calls putPolicy(), displays success or error feedback. All values come from API — no hardcoded numbers.",
+
+    "Create dashboard/src/pages/BackendHealth.tsx: polls GET /api/v1/backends every 2s using usePolling. Renders a table with one row per backend: id, address, state (via StatusBadge), active_connections, requests_total, responses_forwarded_total, proxy_failures_total, last_check_at (formatted), last_response_ms. Shows loading state on first load, ErrorBanner on fetch failure, and a 'No backends' message for empty arrays. Table is accessible: uses <table> with <th scope='col'> headers.",
+
+    "Create dashboard/src/pages/BenchmarkLab.tsx: calls GET /api/v1/benchmarks/latest once on mount and on a manual Refresh button click (no auto-poll — benchmark results do not change continuously). Renders: when available=false, a clear 'No benchmark results available. Run the benchmark client to generate results.' message. When available=true, displays all fields from run object: run_id, completed_at, policy, target, requested_requests, concurrency, completed_requests, failed_requests, duration_seconds, requests_per_second, response_bytes_per_second, latency_p50_ms/p95/p99. Renders null latency values as 'N/A'. Shows loading and error states.",
+
+    "Create dashboard/src/App.tsx: simple client-side routing using a nav bar with three links (Overview | Backend Health | Benchmark Lab) and conditional rendering of the three page components based on a state variable (no external router dependency to keep it simple). Includes the app title 'EdgeMesh-C Dashboard'.",
+
+    "Replace dashboard/src/main.tsx if needed to mount App correctly. Delete the Vite boilerplate files (App.css contents, index.css can be minimal reset). Keep vite.config.ts as-is from the template.",
+
+    "Add CORS proxy config to dashboard/vite.config.ts: server.proxy mapping '/api' to 'http://127.0.0.1:9090' so that during development the browser talks to the Vite dev server and Vite proxies API calls to the C admin API (avoids CORS issues in dev). This does NOT change the production CORS policy of the C server.",
+
+    "Run type-check: from PowerShell: cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npx tsc --noEmit 2>&1\". Fix all TypeScript errors. The check must pass with zero errors."
+  ],
+  "acceptance_criteria": [
+    "dashboard/package.json exists with react, react-dom, typescript, @types/react dependencies",
+    "npx tsc --noEmit in dashboard/ exits with zero errors",
+    "All three pages import data only from api/client.ts (no hardcoded metric values in production screens)",
+    "usePolling cleans up the interval on unmount (verified by reading the hook code)",
+    "ErrorBanner is rendered when the fetch function returns an error (verified by code review)",
+    "StatusBadge renders correct color classes for all three states",
+    "BenchmarkLab renders 'No benchmark results available' when available=false (verified by code reading)",
+    "vite.config.ts contains server.proxy config for /api -> http://127.0.0.1:9090"
+  ],
+  "verification": [
+    "cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npm install 2>&1\"",
+    "cmd /c \"cd c:\\Users\\HARI\\Downloads\\flutter\\edgemesh\\dashboard && npx tsc --noEmit 2>&1\""
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

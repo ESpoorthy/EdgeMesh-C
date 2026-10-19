@@ -1,0 +1,56 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "CMakeLists.txt + all C headers + common/http/backend/health/metrics modules. This is the foundation layer: build system, shared headers, and the five pure-logic modules that have no dependency on the proxy accept loop. All modules compile and unit tests for HTTP parser, backend selector, health state machine, and metrics pass.",
+  "status": "completed",
+  "steps": [
+    "Create results/ directory with a .gitkeep so the directory is tracked. Add results/ to .gitignore so actual output files are never committed.",
+
+    "Create CMakeLists.txt at the workspace root with: cmake_minimum_required(VERSION 3.20), project(edgemesh-c C), set(CMAKE_C_STANDARD 17), compile flags -Wall -Wextra -Wpedantic -Werror -D_POSIX_C_SOURCE=200809L, include_directories(include), four targets: edgemesh (main executable linking all src/ object libraries), demo_backend (src/demo_backend/demo_backend.c), benchmark_client (benchmark/benchmark.c), and five CTest test executables (test_http_parser, test_selector, test_health, test_metrics, test_admin). Each src/<module> is compiled as an OBJECT library and linked into edgemesh. Tests link against the relevant OBJECT library plus test-specific sources from tests/.",
+
+    "Create all headers under include/edgemesh/: log.h (log_info/warn/error macros, structured log_entry function), io_utils.h (read_with_timeout, write_all with MSG_NOSIGNAL), time_utils.h (rfc3339_now, monotonic_ms), http_parser.h (http_request struct: method[16], target[2048], version[16], headers array[32] of name/value pairs, parse_request() returning parse_result enum), http_response.h (send_response, send_error_response), backend.h (backend_state_t enum: UNKNOWN/HEALTHY/UNHEALTHY, backend_t struct with id/address/port/state/active_connections/requests_total/responses_forwarded/proxy_failures/last_check_at/last_response_ms/consec_failures/consec_successes + mutex, backend_pool_t struct with array[3] + policy enum + policy_mutex), selector.h (select_backend returning index or -1, release_backend), health.h (health_worker_start/stop, probe thresholds HEALTH_FAIL_THRESHOLD=3/HEALTH_PASS_THRESHOLD=2), metrics.h (metrics_t struct, metrics_record_request, metrics_record_latency, metrics_get_snapshot, metrics_tick, LATENCY_RING_SIZE=10000, TIME_SERIES_MAX=300), admin_handler.h (handle_admin_request), json_builder.h (json_escape_string, json_append_*), proxy.h (proxy_start, proxy_stop, MAX_CONNECTIONS=64).",
+
+    "Create src/common/log.c: thread-safe logging to stderr with RFC3339 timestamp prefix. Use flockfile/funlockfile or a mutex. Log format: [TIMESTAMP] [LEVEL] message. Never log arbitrary header values verbatim.",
+
+    "Create src/common/io_utils.c: read_with_timeout(fd, buf, max, timeout_ms) using select() then read() in a loop until \\r\\n\\r\\n found or max exceeded, returns bytes read or negative error code. write_all(fd, buf, len) loops over send() with MSG_NOSIGNAL until all bytes sent or error. Both return negative errno-style codes on failure.",
+
+    "Create src/common/time_utils.c: rfc3339_now(char *buf, size_t len) writes current UTC time as 'YYYY-MM-DDTHH:MM:SSZ' using clock_gettime(CLOCK_REALTIME) + gmtime_r. monotonic_ms() returns uint64_t milliseconds from clock_gettime(CLOCK_MONOTONIC). Both safe for concurrent use.",
+
+    "Create src/http/parser.c: parse_request(const char *buf, size_t len, http_request_t *out). Parses only origin-form GET requests. Validates: method == GET, request-target starts with '/', HTTP/1.1 version, headers section <= 16KiB, max 32 header pairs, no request body. Returns PARSE_OK, PARSE_BAD_REQUEST, PARSE_METHOD_NOT_ALLOWED, PARSE_URI_TOO_LONG, PARSE_HEADER_TOO_LARGE. Bounds all sscanf/strncpy operations. Never writes past array bounds.",
+
+    "Create src/http/response.c: send_response(fd, status_code, status_text, headers[], header_count, body, body_len) — builds HTTP/1.1 response with Connection: close, Content-Length, and caller-supplied headers, then calls write_all. send_error_response(fd, status_code, json_body) — sends JSON error body with Content-Type: application/json.",
+
+    "Create src/backend/pool.c: initializes global backend_pool_t g_pool with three backends at 127.0.0.1:9001/9002/9003, state=UNKNOWN, zero counters. pool_lock/pool_unlock helpers (wraps pthread_mutex_lock/unlock on g_pool.mutex). pool_get_backend(int idx) returns pointer. NEVER called while performing I/O.",
+
+    "Create src/backend/selector.c: select_backend(backend_pool_t *pool, int *out_idx) — acquires pool lock, iterates backends: for round_robin tracks last_rr_index (atomic rotation), for least_connections finds healthy backend with min active_connections (tie-break by index rotation). Increments selected backend's active_connections under the lock, releases lock, returns 0 on success or -1 if no healthy backend. release_backend(backend_pool_t *pool, int idx) — acquires lock, decrements active_connections (never below 0), releases lock. Both must be called symmetrically on all exit paths.",
+
+    "Create src/health/checker.c: health_worker_start(backend_pool_t *pool) spawns a pthread that loops every 5 seconds, probing each backend by connect+send 'GET / HTTP/1.0\\r\\n\\r\\n'+read response with a 2-second timeout. On HEALTHY response: increment consec_successes, reset consec_failures; if consec_successes >= HEALTH_PASS_THRESHOLD set state=HEALTHY. On failure: increment consec_failures, reset consec_successes; if consec_failures >= HEALTH_FAIL_THRESHOLD set state=UNHEALTHY. State changes are logged. Updates last_check_at and last_response_ms under pool lock. health_worker_stop() sets a volatile stop flag and joins the thread.",
+
+    "Create src/metrics/metrics.c: global metrics_t g_metrics protected by a mutex. Fields: requests_total, responses_forwarded_total, proxy_failures_total (atomic uint64 counters); active_requests (int, inc/dec under lock); latency ring-buffer double[10000] with head/count; time_series array of 300 time_series_point_t structs (each holds timestamp + snapshot of counters + per-second rates). metrics_record_request(success, bytes, latency_ms): locks, updates counters, pushes to ring. metrics_tick(): called by a 1-second timer, snapshots counters, computes per-second rates from delta, appends to time_series (rotating oldest when full). metrics_get_snapshot(): locks, copies current state, returns by value. metrics_percentile(p): reads ring buffer, sorts copy, returns p-th percentile or NAN if empty. NEVER hold lock during I/O.",
+
+    "Create tests/test_http_parser.c: CTest executable. Tests: valid GET '/', valid GET with query string, GET with 10 valid headers, method POST -> PARSE_METHOD_NOT_ALLOWED, missing Host header -> still PARSE_OK (Host validation is proxy's job), malformed request line -> PARSE_BAD_REQUEST, oversized headers (>16KiB buffer) -> PARSE_HEADER_TOO_LARGE, target > 2047 chars -> PARSE_URI_TOO_LONG, incomplete headers (no \\r\\n\\r\\n) -> PARSE_BAD_REQUEST, empty input -> PARSE_BAD_REQUEST. Use assert() for each case. main() returns 0 on all pass, non-zero on any fail.",
+
+    "Create tests/test_selector.c: CTest executable. Tests: round_robin cycles through 3 healthy backends (call select 9 times, verify each appears 3 times); round_robin skips unhealthy backend (set backend[1] unhealthy, verify only 0 and 2 selected over 6 calls); least_connections picks backend with min active (manually set active_connections, verify selection); least_connections tie-break (equal counts, verify deterministic rotation); release_backend decrements count; no healthy backends returns -1. All state manipulation done with pool_lock/pool_unlock to avoid races.",
+
+    "Create tests/test_health.c: CTest executable. Tests the state machine logic only (not actual network probes): set consec_failures=2, simulate one more failure -> state becomes UNHEALTHY at threshold 3; set consec_successes=1, simulate one more success on UNHEALTHY backend -> state becomes HEALTHY at threshold 2; verify a single failure on HEALTHY does not immediately set UNHEALTHY; verify recovery resets consec_failures.",
+
+    "Create tests/test_metrics.c: CTest executable. Tests: empty ring returns NAN for all percentiles; after 1 sample, p50==p95==p99==that sample; after 100 samples [0..99], p50 near 49.5, p95 near 94.5, p99 near 98.5 (within 1.0); metrics_record_request increments correct counters; active_requests goes up then down correctly; time_series does not exceed 300 points (insert 400 ticks, verify count stays <= 300)."
+  ],
+  "acceptance_criteria": [
+    "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug completes with zero errors",
+    "cmake --build build --parallel completes with zero errors and zero warnings",
+    "ctest --test-dir build --output-on-failure: test_http_parser passes all cases",
+    "ctest --test-dir build --output-on-failure: test_selector passes all cases",
+    "ctest --test-dir build --output-on-failure: test_health passes all cases",
+    "ctest --test-dir build --output-on-failure: test_metrics passes all cases",
+    "No -Werror violations in any compiled translation unit",
+    "results/.gitkeep exists and results/ is in .gitignore"
+  ],
+  "verification": [
+    "wsl -e bash -c \"cd /mnt/c/Users/HARI/Downloads/flutter/edgemesh && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug 2>&1\"",
+    "wsl -e bash -c \"cd /mnt/c/Users/HARI/Downloads/flutter/edgemesh && cmake --build build --parallel 2>&1\"",
+    "wsl -e bash -c \"cd /mnt/c/Users/HARI/Downloads/flutter/edgemesh && ctest --test-dir build --output-on-failure -R 'test_http_parser|test_selector|test_health|test_metrics' 2>&1\""
+  ],
+  "blocked_reason": null,
+  "findings": "Build and all 4 tests passed on first complete run (after fixing two issues during development).\n\nIssue 1: memmem() is not available under _POSIX_C_SOURCE=200809L (it requires _GNU_SOURCE). Replaced with a portable mem_find() helper in parser.c and io_utils.c.\n\nIssue 2: log_info/log_error macros used with zero variadic args in pool.c and checker.c — GCC -Wpedantic rejects ##__VA_ARGS__ when the list is empty. Added log_info_s/log_warn_s/log_error_s variants that forward a bare string via '%s', and updated the two call sites.\n\nIssue 3: test_http_parser linked http_obj (which includes response.c using write_all) but not common_obj (which defines write_all). Added common_obj to test_http_parser link list in CMakeLists.txt.\n\nIssue 4: Parser incomplete-headers test returned PARSE_OK instead of PARSE_BAD_REQUEST. The loop exited when p==end without ever seeing the blank-line terminator. Added a found_end flag; the parser now returns PARSE_BAD_REQUEST if the loop exits without finding the CRLF blank line.\n\nFinal results:\n  cmake configure: exit 0\n  cmake build:     exit 0, zero warnings\n  test_http_parser: Passed (10 cases)\n  test_selector:    Passed (6 cases)\n  test_health:      Passed (5 cases)\n  test_metrics:     Passed (6 cases)\n  100% tests passed, 0 tests failed out of 4"
+}
