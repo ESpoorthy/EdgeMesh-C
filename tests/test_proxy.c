@@ -208,6 +208,19 @@ int main(int argc, char **argv) {
         ++failed;
     }
 
+    static const char header_request[] =
+        "GET /headers HTTP/1.1\r\nHost: client.example\r\n"
+        "X-Test-Forward: expected\r\n"
+        "Connection: close, X-Internal-Remove\r\n"
+        "X-Internal-Remove: secret\r\n\r\n";
+    if (request(header_request, response, sizeof(response)) < 0 ||
+        strstr(response, "200 OK") == NULL ||
+        strstr(response, "X-Test-Forward-Received: yes") == NULL ||
+        strstr(response, "X-Internal-Received: yes") != NULL) {
+        fprintf(stderr, "request header forwarding/hop-by-hop filtering failed\n%s\n", response);
+        ++failed;
+    }
+
     if (request("GET / HTTP/1.1\r\nMissingColon\r\n\r\n", response, sizeof(response)) < 0 ||
         strstr(response, "400 Bad Request") == NULL) {
         fprintf(stderr, "malformed request was not rejected\n%s\n", response);

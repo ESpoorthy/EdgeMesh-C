@@ -341,6 +341,65 @@ static bool collect_connection_tokens(const unsigned char *response, size_t head
     return true;
 }
 
+/* Forward validated end-to-end client headers only. Host is rewritten to the
+ * selected fixed backend and Connection is made explicitly close-delimited. */
+static bool sanitize_client_request(const unsigned char *request, size_t request_header_end,
+                                    unsigned short backend_port,
+                                    const char nominated[32][64], size_t nominated_count,
+                                    unsigned char *output, size_t output_capacity,
+                                    size_t *output_length) {
+    const unsigned char *line_end = NULL;
+    for (size_t i = 1U; i < request_header_end; ++i) {
+        if (request[i - 1U] == '\r' && request[i] == '\n') {
+            line_end = request + i - 1U;
+            break;
+        }
+    }
+    if (line_end == NULL) return false;
+    size_t request_line_length = (size_t)(line_end - request) + 2U;
+    if (request_line_length > output_capacity) return false;
+    memcpy(output, request, request_line_length);
+    size_t out_used = request_line_length;
+
+    const unsigned char *p = line_end + 2;
+    const unsigned char *limit = request + request_header_end - 2U;
+    while (p < limit) {
+        const unsigned char *eol = NULL;
+        for (const unsigned char *q = p; q + 1U < request + request_header_end; ++q) {
+            if (q[0] == '\r' && q[1] == '\n') { eol = q; break; }
+        }
+        if (eol == NULL) return false;
+        size_t line_length = (size_t)(eol - p);
+        if (line_length == 0U) break;
+        const unsigned char *colon = memchr(p, ':', line_length);
+        if (colon == NULL) return false;
+        size_t name_length = (size_t)(colon - p);
+        if (!header_name_is_token(p, name_length)) return false;
+
+        bool skip = is_standard_hop_header(p, name_length) ||
+                    header_name_equals(p, name_length, "Host") ||
+                    header_name_equals(p, name_length, "Content-Length");
+        for (size_t i = 0U; !skip && i < nominated_count; ++i) {
+            if (header_name_equals(p, name_length, nominated[i])) skip = true;
+        }
+
+        size_t complete_line_length = line_length + 2U;
+        if (!skip) {
+            if (out_used + complete_line_length + 128U > output_capacity) return false;
+            memcpy(output + out_used, p, complete_line_length);
+            out_used += complete_line_length;
+        }
+        p = eol + 2;
+    }
+
+    int added = snprintf((char *)output + out_used, output_capacity - out_used,
+                         "Host: 127.0.0.1:%u\r\nConnection: close\r\n\r\n",
+                         (unsigned)backend_port);
+    if (added < 0 || (size_t)added >= output_capacity - out_used) return false;
+    *output_length = out_used + (size_t)added;
+    return true;
+}
+
 /* Remove hop-by-hop fields (including fields nominated by Connection), preserve
  * end-to-end headers/body, and make the client-side close semantics explicit. */
 static bool sanitize_upstream_response(unsigned char *response, size_t capacity,
@@ -588,6 +647,13 @@ static void process_client(int client, int64_t accepted_at) {
         return;
     }
 
+    char request_nominated[32][64];
+    size_t request_nominated_count = 0U;
+    if (!collect_connection_tokens(request, parsed.header_end, request_nominated, &request_nominated_count)) {
+        generated_error(client, 400, "Bad Request", "invalid Connection header\n", accepted_at + REQUEST_DEADLINE_MS);
+        return;
+    }
+
     bool attempted[EM_BACKEND_COUNT] = { false, false, false };
     size_t attempts = 0U;
     int64_t request_deadline = accepted_at + REQUEST_DEADLINE_MS;
@@ -623,12 +689,11 @@ static void process_client(int client, int64_t accepted_at) {
         unsigned char *response = NULL;
         size_t response_length = 0U;
         if (upstream >= 0) {
-            char forwarded[EM_REQUEST_HEADER_MAX + 256U];
-            int forward_length = snprintf(forwarded, sizeof(forwarded),
-                "GET %s HTTP/1.1\r\nHost: 127.0.0.1:%u\r\nConnection: close\r\n\r\n",
-                parsed.target, (unsigned)backend.port);
-            if (forward_length > 0 && (size_t)forward_length < sizeof(forwarded) &&
-                send_all(upstream, forwarded, (size_t)forward_length, attempt_deadline) == 0) {
+            unsigned char forwarded[EM_REQUEST_HEADER_MAX + 256U];
+            size_t forward_length = 0U;
+            bool request_ready = sanitize_client_request(request, parsed.header_end, backend.port,
+                request_nominated, request_nominated_count, forwarded, sizeof(forwarded), &forward_length);
+            if (request_ready && send_all(upstream, forwarded, forward_length, attempt_deadline) == 0) {
                 size_t capacity = EM_RESPONSE_HEADER_MAX + EM_RESPONSE_BODY_MAX + 256U;
                 response = malloc(capacity);
                 if (response != NULL) {
@@ -651,7 +716,7 @@ static void process_client(int client, int64_t accepted_at) {
 
         /* Buffering means no response byte has reached the client before this point;
          * downstream write errors are client disconnects and must not trigger retry. */
-        (void)send_all(client, response, response_length, request_deadline);
+        (void)send_all(client, response, response_length, attempt_deadline);
         free(response);
         em_backend_pool_release(&g_pool, index);
         return;
