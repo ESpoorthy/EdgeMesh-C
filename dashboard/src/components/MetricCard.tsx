@@ -4,47 +4,40 @@ interface MetricCardProps {
   unit?: string;
 }
 
-const skeletonStyle: React.CSSProperties = {
-  display: 'inline-block',
-  width: '60px',
-  height: '1em',
-  borderRadius: '4px',
-  background: 'linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%)',
-  backgroundSize: '200% 100%',
-  animation: 'shimmer 1.4s infinite',
-  verticalAlign: 'middle',
-};
-
 /**
- * Displays a single metric: label + value + optional unit.
- * Renders a loading skeleton when value is undefined or null.
+ * Legacy MetricCard — kept for any remaining imports.
+ * New pages use StatCard instead.
  */
 export function MetricCard({ label, value, unit }: MetricCardProps) {
   const isLoading = value === undefined || value === null;
-  const displayValue = isLoading ? null : typeof value === 'number' ? value : value;
 
   return (
     <div
       aria-label={`${label}${unit ? ` in ${unit}` : ''}`}
       style={{
         padding: '12px 16px',
-        borderRadius: '8px',
-        background: '#fff',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-        minWidth: '140px',
+        borderRadius: 'var(--radius-lg)',
+        background: 'var(--bg-surface)',
+        border: '1px solid var(--border)',
+        minWidth: '130px',
       }}
     >
-      <div style={{ fontSize: '0.75rem', color: '#6b7280', marginBottom: '4px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
         {label}
       </div>
-      <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#111827' }}>
+      <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
         {isLoading ? (
-          <span style={skeletonStyle} aria-busy="true" aria-label="Loading" />
+          <span
+            className="skeleton"
+            style={{ display: 'inline-block', width: 60, height: '1em', verticalAlign: 'middle' }}
+            aria-busy="true"
+            aria-label="Loading"
+          />
         ) : (
           <>
-            {displayValue}
+            {value}
             {unit && (
-              <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#6b7280', marginLeft: '4px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: '4px' }}>
                 {unit}
               </span>
             )}

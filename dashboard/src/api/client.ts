@@ -9,12 +9,14 @@ const BASE_URL = 'http://127.0.0.1:9090';
 // ---------------------------------------------------------------------------
 
 export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: string,
-  ) {
+  readonly status: number;
+  readonly body: string;
+
+  constructor(status: number, body: string) {
     super(`API error ${status}: ${body}`);
     this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
   }
 }
 

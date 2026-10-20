@@ -4,11 +4,12 @@
  * EdgeMesh-C load generator and results writer.
  *
  * Usage:
- *   benchmark_client -n <requests> -c <concurrency> -t <url>
+ *   benchmark_client -n <requests> -c <concurrency> -t <url> [-p <policy>]
  *
  *   -n  total requests (default 1000, max 100000)
  *   -c  concurrency   (default 10,   max 256)
  *   -t  target URL    (required; must be http://127.0.0.1:<port>/...)
+ *   -p  policy name   (default "round_robin")
  *
  * On completion writes results/latest.json and results/latest.csv,
  * resolved from the executable's own directory (argv[0] via dirname).
@@ -184,7 +185,7 @@ static req_result_t do_one_request(const parsed_url_t *url) {
     /* Build GET request. */
     char req[1024];
     int req_len = snprintf(req, sizeof(req),
-        "GET %s HTTP/1.0\r\n"
+        "GET %s HTTP/1.1\r\n"
         "Host: %s:%d\r\n"
         "Connection: close\r\n"
         "\r\n",
@@ -377,6 +378,7 @@ int main(int argc, char *argv[]) {
     int   n_req       = DEFAULT_N;
     int   concurrency = DEFAULT_C;
     char  url_str[MAX_URL_LEN] = "";
+    char  policy_str[64]       = "round_robin";
 
     /* Capture exe directory for results path. */
     char exe_dir[PATH_MAX] = ".";
@@ -410,16 +412,19 @@ int main(int argc, char *argv[]) {
         } else if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) {
             strncpy(url_str, argv[++i], sizeof(url_str) - 1);
             url_str[sizeof(url_str) - 1] = '\0';
+        } else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+            strncpy(policy_str, argv[++i], sizeof(policy_str) - 1);
+            policy_str[sizeof(policy_str) - 1] = '\0';
         } else {
             fprintf(stderr, "benchmark: unknown option '%s'\n", argv[i]);
-            fprintf(stderr, "usage: benchmark_client -n <n> -c <c> -t <url>\n");
+            fprintf(stderr, "usage: benchmark_client -n <n> -c <c> -t <url> [-p <policy>]\n");
             return 1;
         }
     }
 
     if (url_str[0] == '\0') {
         fprintf(stderr, "benchmark: -t <url> is required\n");
-        fprintf(stderr, "usage: benchmark_client -n <n> -c <c> -t <url>\n");
+        fprintf(stderr, "usage: benchmark_client -n <n> -c <c> -t <url> [-p <policy>]\n");
         return 1;
     }
 
@@ -517,6 +522,7 @@ int main(int argc, char *argv[]) {
     printf("\n--- benchmark results ---\n");
     printf("run_id:           %s\n", run_id);
     printf("completed_at:     %s\n", completed_at);
+    printf("policy:           %s\n", policy_str);
     printf("total requests:   %d\n", n_req);
     printf("completed:        %d\n", completed);
     printf("failed:           %d\n", failed);
@@ -534,7 +540,7 @@ int main(int argc, char *argv[]) {
                   duration_s, rps, bps,
                   p50, p95, p99,
                   run_id, completed_at,
-                  "unknown" /* policy read not required for basic run */);
+                  policy_str);
 
     free(s_latencies);
     free(s_bytes_arr);

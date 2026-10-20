@@ -1,20 +1,106 @@
-/* Minimal reset for EdgeMesh-C Dashboard */
+/* =========================================================
+   EdgeMesh-C Dashboard — Design tokens + global reset
+   Dark theme matching the Sigma / Figma design
+   ========================================================= */
+
+/* ----- Design tokens ----- */
+:root {
+  /* Backgrounds */
+  --bg-base:      #0d1117;
+  --bg-surface:   #161b22;
+  --bg-elevated:  #1c2128;
+  --bg-overlay:   #21262d;
+
+  /* Borders */
+  --border:       #30363d;
+  --border-light: #21262d;
+
+  /* Text */
+  --text-primary:   #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted:     #484f58;
+
+  /* Accents */
+  --accent-teal:    #3dd68c;
+  --accent-teal-dim:#1a7f4b;
+  --accent-amber:   #d29922;
+  --accent-amber-bg:#2d1d00;
+  --accent-red:     #f85149;
+  --accent-red-dim: #490202;
+  --accent-blue:    #58a6ff;
+
+  /* Sidebar */
+  --sidebar-width: 168px;
+  --topbar-height: 40px;
+
+  /* Typography */
+  --font-sans: 'Inter', 'system-ui', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+/* ----- Reset ----- */
 *, *::before, *::after {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
-  margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
-  background: #f3f4f6;
-  color: #111827;
+  font-family: var(--font-sans);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
-#root {
-  min-height: 100vh;
+h1, h2, h3, h4 {
+  font-weight: 600;
+  line-height: 1.25;
 }
 
-h1, h2, h3 {
-  margin-top: 0;
+button {
+  font-family: inherit;
+  cursor: pointer;
 }
+
+/* ----- Scrollbar ----- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ----- Shimmer animation for skeleton loaders ----- */
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton {
+  display: inline-block;
+  background: linear-gradient(90deg,
+    var(--bg-overlay) 25%,
+    var(--bg-elevated) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ----- Utility ----- */
+.mono { font-family: var(--font-mono); }
+.text-teal   { color: var(--accent-teal); }
+.text-amber  { color: var(--accent-amber); }
+.text-red    { color: var(--accent-red); }
+.text-muted  { color: var(--text-secondary); }

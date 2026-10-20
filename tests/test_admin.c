@@ -29,6 +29,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* -----------------------------------------------------------------------
  * Assertion helpers
@@ -265,9 +267,72 @@ static void test_build_metrics(void) {
 }
 
 /* -----------------------------------------------------------------------
+ * Test 14: json_build_benchmark_latest (absent, corrupted, and valid)
+ * ----------------------------------------------------------------------- */
+static void test_build_benchmark_latest(const char *argv0) {
+    json_builder_set_exe_path(argv0);
+
+    /* 14a. Absent file -> available: false */
+    char *res = json_build_benchmark_latest();
+    ASSERT(res != NULL, "json_build_benchmark_latest (absent): returns non-NULL");
+    ASSERT_STR_CONTAINS(res, "\"available\": false",
+                        "json_build_benchmark_latest (absent): contains 'available: false'");
+    ASSERT_STR_CONTAINS(res, "\"run\": null",
+                        "json_build_benchmark_latest (absent): contains 'run: null'");
+    free(res);
+
+    /* Prepare a test directory <exe_dir>/results */
+    char tmp[512];
+    strncpy(tmp, argv0 ? argv0 : ".", sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    char *slash = strrchr(tmp, '/');
+    if (slash) *slash = '\0';
+    else strcpy(tmp, ".");
+
+    char dir[1024];
+    char file[1024];
+    snprintf(dir, sizeof(dir), "%s/results", tmp);
+    snprintf(file, sizeof(file), "%s/results/latest.json", tmp);
+    mkdir(dir, 0755);
+
+    /* 14b. Truncated/corrupted file -> returns NULL */
+    FILE *fp = fopen(file, "w");
+    if (fp) {
+        fputs("{\"run_id\": \"truncated_bench\", \"completed\": ", fp);
+        fclose(fp);
+
+        char *corrupt_res = json_build_benchmark_latest();
+        ASSERT(corrupt_res == NULL,
+               "json_build_benchmark_latest (truncated): returns NULL");
+        if (corrupt_res) free(corrupt_res);
+    }
+
+    /* 14c. Valid JSON file -> returns available: true with run */
+    fp = fopen(file, "w");
+    if (fp) {
+        fputs("{\"run_id\": \"bench-123\", \"completed_requests\": 100}", fp);
+        fclose(fp);
+
+        char *valid_res = json_build_benchmark_latest();
+        ASSERT(valid_res != NULL,
+               "json_build_benchmark_latest (valid): returns non-NULL");
+        ASSERT_STR_CONTAINS(valid_res, "\"available\": true",
+                            "json_build_benchmark_latest (valid): contains 'available: true'");
+        ASSERT_STR_CONTAINS(valid_res, "\"run\": {",
+                            "json_build_benchmark_latest (valid): contains 'run: {'");
+        ASSERT_STR_CONTAINS(valid_res, "bench-123",
+                            "json_build_benchmark_latest (valid): contains run_id");
+        if (valid_res) free(valid_res);
+    }
+
+    /* Clean up temporary file so subsequent tests see clean state */
+    unlink(file);
+}
+
+/* -----------------------------------------------------------------------
  * main
  * ----------------------------------------------------------------------- */
-int main(void) {
+int main(int argc, char *argv[]) {
     /* Initialise pool and metrics for tests that need them. */
     pool_init();
 
@@ -286,6 +351,7 @@ int main(void) {
     test_policy_invalid_does_not_mutate();
     test_build_overview();
     test_build_metrics();
+    test_build_benchmark_latest((argc > 0 && argv[0]) ? argv[0] : ".");
 
     printf("\n=== %d failure(s) ===\n", s_failures);
     return (s_failures == 0) ? 0 : 1;

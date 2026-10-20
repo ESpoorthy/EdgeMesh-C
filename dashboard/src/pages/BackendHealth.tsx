@@ -1,100 +1,210 @@
 import { getBackends } from '../api/client.ts';
 import { usePolling } from '../hooks/usePolling.ts';
-import { StatusBadge } from '../components/StatusBadge.tsx';
-import { ErrorBanner } from '../components/ErrorBanner.tsx';
+import type { Backend } from '../api/client.ts';
 
 function formatTimestamp(ts: string | null): string {
-  if (!ts) return 'N/A';
-  try {
-    return new Date(ts).toLocaleString();
-  } catch {
-    return ts;
-  }
+  if (!ts) return '—';
+  try { return new Date(ts).toLocaleTimeString(); } catch { return ts; }
 }
 
-/**
- * Backend Health page — polls GET /api/v1/backends every 2 s.
- * Renders an accessible table with one row per backend.
- */
+function stateColor(state: Backend['state']) {
+  if (state === 'healthy')   return 'var(--accent-teal)';
+  if (state === 'unhealthy') return 'var(--accent-red)';
+  return 'var(--accent-amber)';
+}
+
+function stateLabel(state: Backend['state']) {
+  if (state === 'healthy')   return 'Healthy';
+  if (state === 'unhealthy') return 'Unhealthy';
+  return 'Unknown';
+}
+
 export function BackendHealth() {
   const { data, loading, error } = usePolling(getBackends, 2000);
 
   return (
-    <section aria-labelledby="backends-heading">
-      <h2 id="backends-heading">Backend Health</h2>
+    <div>
+      {/* Page header */}
+      <div style={{ marginBottom: '20px' }}>
+        <h2 style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
+          Backend Health
+        </h2>
+        <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+          Real-time state of all configured backends. Probed every 5 s.
+        </p>
+      </div>
 
-      <ErrorBanner error={error} />
-
-      {loading && !data && (
-        <p aria-busy="true" aria-label="Loading backends">Loading…</p>
-      )}
-
-      {!loading && data && data.backends.length === 0 && (
-        <p>No backends configured.</p>
-      )}
-
-      {data && data.backends.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
-          <table
-            aria-label="Backend health table"
-            style={{
-              borderCollapse: 'collapse',
-              width: '100%',
-              fontSize: '0.875rem',
-            }}
-          >
-            <thead>
-              <tr style={{ background: '#f9fafb', textAlign: 'left' }}>
-                <th scope="col" style={thStyle}>ID</th>
-                <th scope="col" style={thStyle}>Address</th>
-                <th scope="col" style={thStyle}>State</th>
-                <th scope="col" style={thStyle}>Active Conns</th>
-                <th scope="col" style={thStyle}>Requests Total</th>
-                <th scope="col" style={thStyle}>Forwarded</th>
-                <th scope="col" style={thStyle}>Failures</th>
-                <th scope="col" style={thStyle}>Last Check</th>
-                <th scope="col" style={thStyle}>Last Response (ms)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.backends.map((b, i) => (
-                <tr
-                  key={b.id}
-                  style={{ background: i % 2 === 0 ? '#fff' : '#f9fafb', borderTop: '1px solid #e5e7eb' }}
-                >
-                  <td style={tdStyle}>{b.id}</td>
-                  <td style={tdStyle}>{b.address}</td>
-                  <td style={tdStyle}>
-                    <StatusBadge state={b.state} />
-                  </td>
-                  <td style={tdStyle}>{b.active_connections}</td>
-                  <td style={tdStyle}>{b.requests_total}</td>
-                  <td style={tdStyle}>{b.responses_forwarded_total}</td>
-                  <td style={tdStyle}>{b.proxy_failures_total}</td>
-                  <td style={tdStyle}>{formatTimestamp(b.last_check_at)}</td>
-                  <td style={tdStyle}>{b.last_response_ms ?? 'N/A'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: '8px' }}>
-            Generated at: {data.generated_at}
-          </p>
+      {/* Error state */}
+      {error && (
+        <div
+          role="alert"
+          style={{
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-md)',
+            background: 'rgba(248,81,73,0.08)',
+            border: '1px solid rgba(248,81,73,0.3)',
+            color: 'var(--accent-red)',
+            fontSize: '12px',
+            marginBottom: '16px',
+          }}
+        >
+          ✗ Could not reach admin API — {error.message}
         </div>
       )}
-    </section>
+
+      {/* Loading skeleton */}
+      {loading && !data && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {[1, 2, 3].map(i => (
+            <div
+              key={i}
+              className="skeleton"
+              style={{
+                height: 88,
+                borderRadius: 'var(--radius-lg)',
+                width: '100%',
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Backend cards */}
+      {data && data.backends.length > 0 && (
+        <div role="list" aria-label="Configured backends" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {data.backends.map(b => (
+            <BackendCard key={b.id} backend={b} />
+          ))}
+        </div>
+      )}
+
+      {data && data.backends.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', padding: '32px', textAlign: 'center', fontSize: '13px' }}>
+          No backends configured.
+        </div>
+      )}
+
+      {data && (
+        <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)' }}>
+          Generated at: {data.generated_at}
+        </div>
+      )}
+    </div>
   );
 }
 
-const thStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  fontWeight: 600,
-  color: '#374151',
-  whiteSpace: 'nowrap',
-};
+function BackendCard({ backend: b }: { backend: Backend }) {
+  const color = stateColor(b.state);
+  const totalReqs = Math.max(b.requests_total, 1);
+  const fwdPct = ((b.responses_forwarded_total / totalReqs) * 100).toFixed(1);
 
-const tdStyle: React.CSSProperties = {
-  padding: '10px 12px',
-  color: '#374151',
-  whiteSpace: 'nowrap',
-};
+  return (
+    <div
+      role="listitem"
+      style={{
+        background: 'var(--bg-surface)',
+        border: `1px solid var(--border)`,
+        borderLeft: `3px solid ${color}`,
+        borderRadius: 'var(--radius-lg)',
+        padding: '14px 18px',
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: '12px',
+        alignItems: 'center',
+      }}
+    >
+      {/* Left: identity + metrics */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'center' }}>
+        {/* Identity */}
+        <div style={{ minWidth: 160 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+            <span
+              style={{
+                display: 'inline-block',
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: color,
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontWeight: 600, fontSize: '13px', color: 'var(--text-primary)' }}>
+              {b.id}
+            </span>
+          </div>
+          <div style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', paddingLeft: 16 }}>
+            {b.address}
+          </div>
+        </div>
+
+        {/* State badge */}
+        <div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '3px' }}>State</div>
+          <span
+            style={{
+              padding: '2px 10px',
+              borderRadius: 'var(--radius-sm)',
+              background: `${color}18`,
+              border: `1px solid ${color}40`,
+              fontSize: '11px',
+              fontWeight: 600,
+              color,
+              letterSpacing: '0.04em',
+            }}
+          >
+            {stateLabel(b.state)}
+          </span>
+        </div>
+
+        {/* Metrics */}
+        <MetricPill label="Active" value={String(b.active_connections)} />
+        <MetricPill label="Requests" value={b.requests_total.toLocaleString()} />
+        <MetricPill label="Forwarded" value={`${b.responses_forwarded_total.toLocaleString()} (${fwdPct}%)`} />
+        <MetricPill label="Failures" value={String(b.proxy_failures_total)} accent={b.proxy_failures_total > 0} />
+        <MetricPill label="Last check" value={formatTimestamp(b.last_check_at)} />
+        <MetricPill
+          label="Probe latency"
+          value={b.last_response_ms !== null ? `${b.last_response_ms} ms` : '—'}
+        />
+      </div>
+
+      {/* Right: large state indicator */}
+      <div
+        style={{
+          textAlign: 'right',
+          flexShrink: 0,
+        }}
+      >
+        <div
+          style={{
+            fontSize: '11px',
+            fontWeight: 700,
+            color,
+            letterSpacing: '0.06em',
+            textTransform: 'uppercase',
+          }}
+        >
+          {stateLabel(b.state)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricPill({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '2px' }}>{label}</div>
+      <div
+        style={{
+          fontSize: '12px',
+          fontFamily: 'var(--font-mono)',
+          color: accent ? 'var(--accent-red)' : 'var(--text-primary)',
+          fontWeight: accent ? 600 : 400,
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}

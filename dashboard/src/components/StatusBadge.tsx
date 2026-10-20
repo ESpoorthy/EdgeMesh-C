@@ -4,19 +4,14 @@ interface StatusBadgeProps {
   state: BackendState;
 }
 
-const STATE_STYLES: Record<BackendState, { bg: string; label: string }> = {
-  healthy: { bg: '#22c55e', label: 'Healthy' },
-  unhealthy: { bg: '#ef4444', label: 'Unhealthy' },
-  unknown: { bg: '#9ca3af', label: 'Unknown' },
+const STATE_STYLES: Record<BackendState, { color: string; label: string }> = {
+  healthy:   { color: 'var(--accent-teal)',  label: 'Healthy'   },
+  unhealthy: { color: 'var(--accent-red)',   label: 'Unhealthy' },
+  unknown:   { color: 'var(--accent-amber)', label: 'Unknown'   },
 };
 
-/**
- * Inline badge that displays backend state.
- * healthy → green, unhealthy → red, unknown → gray.
- * Accessible: role="status" + aria-label.
- */
 export function StatusBadge({ state }: StatusBadgeProps) {
-  const { bg, label } = STATE_STYLES[state];
+  const { color, label } = STATE_STYLES[state];
   return (
     <span
       role="status"
@@ -24,12 +19,13 @@ export function StatusBadge({ state }: StatusBadgeProps) {
       style={{
         display: 'inline-block',
         padding: '2px 10px',
-        borderRadius: '12px',
-        backgroundColor: bg,
-        color: '#fff',
-        fontSize: '0.75rem',
+        borderRadius: 'var(--radius-sm)',
+        backgroundColor: `${color}18`,
+        border: `1px solid ${color}40`,
+        color,
+        fontSize: '11px',
         fontWeight: 600,
-        letterSpacing: '0.02em',
+        letterSpacing: '0.04em',
         textTransform: 'uppercase',
       }}
     >

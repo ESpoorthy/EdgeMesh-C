@@ -297,6 +297,126 @@ for endpoint in "${ADMIN_ENDPOINTS[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
+# INT-10d (admin edge cases): 404, 405, 400, 413, CORS preflight & rejection,
+# corrupted benchmark json handling, and 16-connection limit.
+# ---------------------------------------------------------------------------
+echo ""
+echo "[INT-10d] Testing admin error paths, CORS preflight/rejection, corrupted benchmark, and connection limits..."
+
+# 1. 404 on unknown route
+RAW=$(http_get "http://127.0.0.1:9090/api/v1/nonexistent_route" 2>/dev/null) || true
+STATUS=$(extract_status "${RAW}")
+BODY=$(extract_body "${RAW}")
+if [[ "${STATUS}" == "404" ]] && echo "${BODY}" | grep -q '"NOT_FOUND"'; then
+    pass "INT-10d (404): unknown admin route returns 404 with NOT_FOUND"
+else
+    fail "INT-10d (404): expected 404 NOT_FOUND, got status=${STATUS} body=${BODY}"
+fi
+
+# 2. 405 on unsupported method
+RAW=$(curl -s -w "\n__STATUS__%{http_code}" -X POST "http://127.0.0.1:9090/api/v1/health" 2>/dev/null) || true
+STATUS=$(extract_status "${RAW}")
+BODY=$(extract_body "${RAW}")
+if [[ "${STATUS}" == "405" ]] && echo "${BODY}" | grep -q '"METHOD_NOT_ALLOWED"'; then
+    pass "INT-10d (405): POST /api/v1/health returns 405 with METHOD_NOT_ALLOWED"
+else
+    fail "INT-10d (405): expected 405 METHOD_NOT_ALLOWED, got status=${STATUS} body=${BODY}"
+fi
+
+# 3. 400 on window_seconds out-of-range (<10, >300, non-integer)
+for ws in "5" "301" "abc"; do
+    RAW=$(http_get "http://127.0.0.1:9090/api/v1/metrics?window_seconds=${ws}" 2>/dev/null) || true
+    STATUS=$(extract_status "${RAW}")
+    BODY=$(extract_body "${RAW}")
+    if [[ "${STATUS}" == "400" ]] && echo "${BODY}" | grep -q '"INVALID_PARAMETER"'; then
+        pass "INT-10d (400): window_seconds=${ws} correctly rejected with 400"
+    else
+        fail "INT-10d (400): window_seconds=${ws} expected 400, got status=${STATUS} body=${BODY}"
+    fi
+done
+
+# 4. 413 on oversized body (>4 KiB)
+LARGE_BODY=$(python3 -c 'print("X" * 4097)')
+RAW=$(curl -s -w "\n__STATUS__%{http_code}" -X PUT \
+    -H "Content-Type: application/json" \
+    -d "${LARGE_BODY}" \
+    "http://127.0.0.1:9090/api/v1/policy" 2>/dev/null) || true
+STATUS=$(extract_status "${RAW}")
+BODY=$(extract_body "${RAW}")
+if [[ "${STATUS}" == "413" ]] && echo "${BODY}" | grep -q '"BODY_TOO_LARGE"'; then
+    pass "INT-10d (413): request body > 4 KiB returns 413 BODY_TOO_LARGE"
+else
+    fail "INT-10d (413): expected 413 BODY_TOO_LARGE, got status=${STATUS} body=${BODY}"
+fi
+
+# 5. CORS OPTIONS preflight
+PREFLIGHT_HDRS=$(curl -s -i -X OPTIONS -H "Origin: http://localhost:5173" "http://127.0.0.1:9090/api/v1/policy" 2>/dev/null) || true
+if echo "${PREFLIGHT_HDRS}" | grep -q "200 OK" && \
+   echo "${PREFLIGHT_HDRS}" | grep -q "Access-Control-Allow-Origin: http://localhost:5173" && \
+   echo "${PREFLIGHT_HDRS}" | grep -q "Access-Control-Allow-Methods: GET, PUT, OPTIONS"; then
+    pass "INT-10d (CORS preflight): OPTIONS with allowed origin returns 200 and correct CORS headers"
+else
+    fail "INT-10d (CORS preflight): OPTIONS preflight headers invalid (headers=${PREFLIGHT_HDRS:0:200})"
+fi
+
+# 6. CORS rejected origin
+REJECT_HDRS=$(curl -s -i -X GET -H "Origin: http://evil.com" "http://127.0.0.1:9090/api/v1/health" 2>/dev/null) || true
+if ! echo "${REJECT_HDRS}" | grep -q "Access-Control-Allow-Origin"; then
+    pass "INT-10d (CORS rejection): unapproved origin http://evil.com does not receive Access-Control-Allow-Origin"
+else
+    fail "INT-10d (CORS rejection): unapproved origin unexpectedly received allow header"
+fi
+
+# 7. Corrupted results/latest.json regression test
+mkdir -p "${BIN_DIR}/results"
+echo -n '{"run_id": "test_corrupt", "completed_requests": ' > "${BIN_DIR}/results/latest.json"
+RAW=$(http_get "http://127.0.0.1:9090/api/v1/benchmarks/latest" 2>/dev/null) || true
+STATUS=$(extract_status "${RAW}")
+BODY=$(extract_body "${RAW}")
+rm -f "${BIN_DIR}/results/latest.json"
+if [[ "${STATUS}" == "500" ]] && echo "${BODY}" | grep -q '"INTERNAL"'; then
+    pass "INT-10d (corrupted benchmark JSON): returns 500 with INTERNAL error"
+else
+    fail "INT-10d (corrupted benchmark JSON): expected 500 INTERNAL, got status=${STATUS} body=${BODY}"
+fi
+
+# 8. Deterministic admin connection limit test (16 max -> 17th gets 503)
+LIMIT_RES=$(python3 << 'EOF'
+import socket, sys
+socks = []
+try:
+    for _ in range(16):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(("127.0.0.1", 9090))
+        socks.append(s)
+    # 17th connection must receive 503
+    s17 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s17.settimeout(2.0)
+    s17.connect(("127.0.0.1", 9090))
+    resp = s17.recv(1024).decode("utf-8", errors="replace")
+    s17.close()
+    if "503" in resp and "TOO_MANY_CONNECTIONS" in resp:
+        print("PASS")
+    else:
+        print("FAIL: " + resp[:100])
+except Exception as e:
+    print("ERROR: " + str(e))
+finally:
+    for s in socks:
+        try:
+            s.close()
+        except:
+            pass
+EOF
+)
+if [[ "${LIMIT_RES}" == "PASS" ]]; then
+    pass "INT-10d (connection limit): 17th connection rejected with 503 TOO_MANY_CONNECTIONS"
+else
+    fail "INT-10d (connection limit): limit test failed: ${LIMIT_RES}"
+fi
+
+# ---------------------------------------------------------------------------
 # INT-05: Kill one backend, wait for health probe to mark it unhealthy
 # ---------------------------------------------------------------------------
 echo ""

@@ -409,6 +409,68 @@ char *json_build_metrics(int window_s) {
     return heap_copy(buf, pos);
 }
 
+/*
+ * Validate that buf contains a well-formed JSON object at the top level.
+ * Rejects non-objects, unclosed strings, unbalanced braces/brackets,
+ * truncated inputs, and trailing garbage after the root object.
+ */
+static int is_valid_json_object(const char *buf, size_t len) {
+    if (!buf || len == 0) return 0;
+
+    size_t i = 0;
+    while (i < len && (buf[i] == ' ' || buf[i] == '\t' ||
+                       buf[i] == '\r' || buf[i] == '\n')) {
+        i++;
+    }
+    if (i >= len || buf[i] != '{') return 0;
+
+    char stack[256];
+    int sp = 0;
+    int in_string = 0;
+    int escape = 0;
+    int object_closed = 0;
+
+    for (; i < len; i++) {
+        unsigned char c = (unsigned char)buf[i];
+
+        if (in_string) {
+            if (escape) {
+                escape = 0;
+            } else if (c == '\\') {
+                escape = 1;
+            } else if (c == '"') {
+                in_string = 0;
+            } else if (c < 0x20) {
+                /* Control characters not allowed in JSON strings without escape */
+                return 0;
+            }
+        } else {
+            /* Outside string: if the root object already closed, only whitespace is allowed */
+            if (object_closed) {
+                if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
+                    return 0;
+                }
+                continue;
+            }
+
+            if (c == '"') {
+                in_string = 1;
+            } else if (c == '{' || c == '[') {
+                if (sp >= (int)sizeof(stack)) return 0; /* stack overflow protection */
+                stack[sp++] = (char)c;
+            } else if (c == '}') {
+                if (sp <= 0 || stack[--sp] != '{') return 0;
+                if (sp == 0) object_closed = 1;
+            } else if (c == ']') {
+                if (sp <= 0 || stack[--sp] != '[') return 0;
+            }
+        }
+    }
+
+    /* Valid if we're not in a string, all braces/brackets are matched, and object was closed */
+    return (!in_string && !escape && sp == 0 && object_closed);
+}
+
 /* -----------------------------------------------------------------------
  * json_build_benchmark_latest
  *
@@ -458,14 +520,9 @@ char *json_build_benchmark_latest(void) {
 
     file_buf[nread] = '\0';
 
-    /* Basic sanity: must start with '{'. */
-    size_t i = 0;
-    while (i < nread && (file_buf[i] == ' ' || file_buf[i] == '\t' ||
-                          file_buf[i] == '\r' || file_buf[i] == '\n')) {
-        i++;
-    }
-    if (i >= nread || file_buf[i] != '{') {
-        log_error_s("json_build_benchmark_latest: invalid JSON in results file");
+    /* Validate JSON structure before wrapping. */
+    if (!is_valid_json_object(file_buf, nread)) {
+        log_error_s("json_build_benchmark_latest: invalid or truncated JSON in results file");
         return NULL;
     }
 
