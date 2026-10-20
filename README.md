@@ -7,7 +7,7 @@ EdgeMesh-C is a Computer Networks systems project focused on what happens betwee
 
 The project combines a native C networking core with a separate React + TypeScript dashboard. Its signature interface visualises the gateway, backend pool, health state and measured traffic distribution.
 
-> **Project status:** The MVP specification and design handoff are established. Implementation is being developed in milestones. Features described below are planned until their code and tests are committed; this README will be updated as milestones become runnable.
+> **Project status:** M1 is merged. M2 routing and resilience now passes the macOS warnings-as-errors CI suite and is ready for merge in [PR #3](https://github.com/ESpoorthy/EdgeMesh-C/pull/3). The admin API/metrics, benchmark utility and dashboard remain future milestones.
 
 [**Figma UI/UX and design system**](https://www.figma.com/design/cGO3ieo6621gyju6N7yZ2s/edgemesh-c) · [Requirements](docs/requirements.md) · [Architecture](docs/architecture.md) · [API contract](docs/api-contract.md) · [Test plan](docs/test-plan.md)
 
@@ -58,26 +58,11 @@ flowchart LR
     API --> Results
 ```
 
-### Request lifecycle
+## Dashboard and design
 
-1. A client sends a supported HTTP GET request to the proxy.
-2. The C proxy validates the request and selects an eligible healthy backend.
-3. The request is forwarded to that configured backend, and its response is returned to the client.
-4. Health checks update backend availability; failures remove backends from new selections until recovery criteria are met.
-5. The service records real counters and latency samples.
-6. The dashboard queries the local admin API, while the benchmark client saves its own completed run.
+The Figma file is the visual and interaction reference for the three application screens: Overview, Backend Health and Benchmark Lab. Design System and React + TypeScript Handoff are reference frames, not additional app routes.
 
-## Planned dashboard
-
-The Figma file is the visual and interaction reference for the three application screens.
-
-- **Overview** — service/proxy state, request KPIs, traffic topology, request rate and latency.
-- **Backend Health** — backend state, active connections, request statistics and balancing-policy selection.
-- **Benchmark Lab** — the latest saved benchmark result, completion/failure counts, throughput and latency percentiles.
-
-The Design System and React + TypeScript Handoff frames are implementation references, not additional application routes.
-
-Prototype fixtures must remain visibly labelled as `PROTOTYPE DATA`. In the integrated application, live values must come from the C API. The first version reads the latest CLI-generated benchmark result; it does not provide an API endpoint to start a benchmark or browse historical runs.
+Prototype fixtures must remain visibly labelled as `PROTOTYPE DATA`. In the integrated application, live values must come from the C API. The first version reads the latest CLI-generated benchmark result; it does not provide an API endpoint to start a run or browse historical runs.
 
 ## API contract
 
@@ -105,23 +90,31 @@ The API contract documents response fields, units, error envelopes and empty-dat
 
 ## Build and run
 
-The CMake project and executable targets are being implemented incrementally. **Build and run commands will be published here once the first working implementation milestone is committed and verified.** Until then, refer to [the test plan](docs/test-plan.md) for the intended build/test workflow; it describes planned commands, not completed test results.
-
-The intended development checks are:
+On macOS with Xcode Command Line Tools and CMake installed:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEDGEMESH_ENABLE_WARNINGS_AS_ERRORS=ON
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-No build or test result should be inferred from the presence of these commands. See the latest commits and pull requests for the implementation state.
+Start three backends in separate terminals, then start the proxy:
+
+```sh
+./build/edgemesh-backend --port 9001 --id backend-1
+./build/edgemesh-backend --port 9002 --id backend-2
+./build/edgemesh-backend --port 9003 --id backend-3
+./build/edgemesh-proxy --policy round_robin
+curl --include http://127.0.0.1:8080/demo
+```
+
+Change the startup routing policy with `--policy least_connections`. Health state starts as unknown and requires two successful probes before a backend receives traffic.
 
 ## Security and scope
 
 EdgeMesh-C is a **local educational prototype**.
 
-- Bind the proxy and admin API to IPv4 loopback by default.
+- Bind listeners to IPv4 loopback by default.
 - Restrict upstream destinations to the three configured demo backends; do not create an open proxy.
 - Bound request sizes, connection counts, timeouts and retained metrics.
 - Validate admin input and restrict browser CORS to the documented development origins.
@@ -132,16 +125,14 @@ Do not expose the admin API publicly or use the prototype as an internet-facing 
 
 ## Development roadmap
 
-Implementation is planned in reviewable milestones:
+M1 and M2 are complete in code; M2's latest source and tests are verified by the macOS CI run linked in [PR #3](https://github.com/ESpoorthy/EdgeMesh-C/pull/3). A milestone is only complete once its implementation and relevant tests pass.
 
-- [ ] **M1 — Working C foundation:** CMake project, demo backend, basic proxy and focused tests.
-- [ ] **M2 — Routing and resilience:** Round Robin, Least Connections, health checks and failover.
+- [x] **M1 — Working C foundation:** CMake project, demo backend, basic proxy and focused tests.
+- [x] **M2 — Routing and resilience:** Round Robin, Least Connections, bounded concurrency, health checks, failover and recovery.
 - [ ] **M3 — Admin API and metrics:** six documented endpoints and real runtime measurements.
 - [ ] **M4 — Benchmarking:** load generator, result validation and JSON/CSV output.
 - [ ] **M5 — Dashboard integration:** implement the approved Figma screens against live API data.
 - [ ] **M6 — Validation and demo:** failure tests, reproducible benchmarks, documentation and demonstration evidence.
-
-Roadmap items should be marked complete only after the implementation exists and its relevant tests have been run.
 
 ## Repository map
 
@@ -155,8 +146,10 @@ EdgeMesh-C/
 │   ├── requirements.md
 │   ├── architecture.md
 │   ├── api-contract.md
-│   └── test-plan.md
-├── include/
+│   ├── milestone-1.md
+│   ├── milestone-2.md
+│   └── milestone-3-handoff.md
+├── include/edgemesh/
 ├── src/
 ├── tests/
 ├── benchmark/
@@ -164,13 +157,11 @@ EdgeMesh-C/
 └── results/
 ```
 
-This is the intended structure; folders and source targets will appear as their milestones are implemented.
-
 ## Contributing and team workflow
 
-Keep changes small and reviewable. Read `AGENTS.md` and the four specification documents before implementation. Keep the C core separate from the dashboard, do not invent new API routes independently, and update the documentation when a contract change is necessary.
+Read `AGENTS.md` and the four specification documents before implementation. Keep changes reviewable, do not invent API routes, and update documentation when implementation changes require it.
 
-For each change, report the files modified, commands actually run, test results and remaining limitations. Never claim a build, test, benchmark or feature passed without evidence.
+For every milestone, report changed files, actual commands and test results, and known limitations. Never claim a build, test, benchmark or feature passed without evidence.
 
 ## License
 

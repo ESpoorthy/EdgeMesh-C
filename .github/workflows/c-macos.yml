@@ -1,0 +1,23 @@
+name: C macOS build and tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches:
+      - main
+      - "milestone*/*"
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Configure warnings-as-errors build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DEDGEMESH_ENABLE_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure

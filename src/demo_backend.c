@@ -29,10 +29,15 @@ static void serve(int fd, const char *id) {
     const char *body = health ? "ok\n" : NULL;
     char default_body[128];
     if (!health) { (void)snprintf(default_body, sizeof(default_body), "Hello from %s\n", id); body = default_body; }
+    const char *forwarded_header = strstr(request, "X-Test-Forward: expected\r\n") != NULL
+        ? "X-Test-Forward-Received: yes\r\n" : "";
+    const char *nominated_header = strstr(request, "X-Internal-Remove: secret\r\n") != NULL
+        ? "X-Internal-Received: yes\r\n" : "";
     char response[512]; size_t body_len = strlen(body);
     int n = snprintf(response, sizeof(response),
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nX-Backend-ID: %s\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-        id, body_len, body);
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\n"
+        "X-Backend-ID: %s\r\n%s%sContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
+        id, forwarded_header, nominated_header, body_len, body);
     if (n > 0 && (size_t)n < sizeof(response)) {
         size_t sent = 0U;
         while (sent < (size_t)n) { ssize_t w = send(fd, response + sent, (size_t)n - sent, 0); if (w <= 0) break; sent += (size_t)w; }
