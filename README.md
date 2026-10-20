@@ -7,7 +7,7 @@ EdgeMesh-C is a Computer Networks systems project focused on what happens betwee
 
 The project combines a native C networking core with a separate React + TypeScript dashboard. Its signature interface visualises the gateway, backend pool, health state and measured traffic distribution.
 
-> **Project status:** M1 is merged and has a verified basic networking foundation. M2 adds routing and resilience and is under test/review. Later features remain planned until implemented and tested.
+> **Project status:** M1 is merged. M2 routing and resilience now passes the macOS warnings-as-errors CI suite and is ready for merge in [PR #3](https://github.com/ESpoorthy/EdgeMesh-C/pull/3). The admin API/metrics, benchmark utility and dashboard remain future milestones.
 
 [**Figma UI/UX and design system**](https://www.figma.com/design/cGO3ieo6621gyju6N7yZ2s/edgemesh-c) · [Requirements](docs/requirements.md) · [Architecture](docs/architecture.md) · [API contract](docs/api-contract.md) · [Test plan](docs/test-plan.md)
 
@@ -83,7 +83,7 @@ The API contract documents response fields, units, error envelopes and empty-dat
 
 - **C17** — proxy, demo backends, administrative API and benchmark utility
 - **POSIX/BSD sockets + pthreads** — network I/O and concurrency on macOS
-- **CMake + CTest** — reproducible builds and automated tests
+- **CMake + CTest** — reproducible builds and automated testing
 - **React + TypeScript** — dashboard presentation and API interaction
 - **Figma** — visual design, components and developer handoff
 - **Wireshark (optional)** — independent inspection of local HTTP traffic during demonstrations
@@ -125,10 +125,10 @@ Do not expose the admin API publicly or use the prototype as an internet-facing 
 
 ## Development roadmap
 
-Implementation is delivered in reviewable milestones. An item is marked complete only when implementation exists and relevant tests have actually run.
+M1 and M2 are complete in code; M2's latest source and tests are verified by the macOS CI run linked in [PR #3](https://github.com/ESpoorthy/EdgeMesh-C/pull/3). A milestone is only complete once its implementation and relevant tests pass.
 
 - [x] **M1 — Working C foundation:** CMake project, demo backend, basic proxy and focused tests.
-- [ ] **M2 — Routing and resilience:** Round Robin, Least Connections, bounded concurrency, health checks and failover.
+- [x] **M2 — Routing and resilience:** Round Robin, Least Connections, bounded concurrency, health checks, failover and recovery.
 - [ ] **M3 — Admin API and metrics:** six documented endpoints and real runtime measurements.
 - [ ] **M4 — Benchmarking:** load generator, result validation and JSON/CSV output.
 - [ ] **M5 — Dashboard integration:** implement the approved Figma screens against live API data.
@@ -147,7 +147,8 @@ EdgeMesh-C/
 │   ├── architecture.md
 │   ├── api-contract.md
 │   ├── milestone-1.md
-│   └── milestone-2.md
+│   ├── milestone-2.md
+│   └── milestone-3-handoff.md
 ├── include/edgemesh/
 ├── src/
 ├── tests/
