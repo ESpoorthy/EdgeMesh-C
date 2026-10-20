@@ -42,6 +42,8 @@ int main(void) {
     em_backend_pool_probe_result(&pool, 1U, false, 2000, 1.0);
     (void)em_backend_pool_snapshot(&pool, 1U, &snapshot);
     if (snapshot.state != EM_BACKEND_UNHEALTHY) failed += fail("backend did not become unhealthy after three failures");
+    if (!snapshot.has_probe_result || snapshot.last_check_unix_ms != 2000 ||
+        snapshot.last_probe_ms != 1.0) failed += fail("probe timestamp/latency were not recorded");
     if (em_backend_pool_select_reserve(&pool, NULL) == 1) failed += fail("unhealthy backend was selected");
     em_backend_pool_probe_result(&pool, 1U, true, 3000, 1.5);
     (void)em_backend_pool_snapshot(&pool, 1U, &snapshot);
