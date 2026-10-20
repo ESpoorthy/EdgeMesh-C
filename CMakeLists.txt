@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.16)
+project(EdgeMeshC VERSION 0.1.0 LANGUAGES C)
+
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+option(EDGEMESH_ENABLE_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
+
+add_library(edgemesh_http src/http.c)
+target_include_directories(edgemesh_http PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_compile_options(edgemesh_http PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+if(EDGEMESH_ENABLE_WARNINGS_AS_ERRORS)
+  target_compile_options(edgemesh_http PRIVATE -Werror)
+endif()
+
+add_executable(edgemesh-proxy src/proxy_main.c src/proxy.c)
+target_link_libraries(edgemesh-proxy PRIVATE edgemesh_http)
+target_compile_options(edgemesh-proxy PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+
+add_executable(edgemesh-backend src/demo_backend.c)
+target_compile_options(edgemesh-backend PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(test_http tests/test_http.c)
+  target_link_libraries(test_http PRIVATE edgemesh_http)
+  target_compile_options(test_http PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+  add_test(NAME http_parser COMMAND test_http)
+
+  add_executable(test_proxy tests/test_proxy.c src/proxy.c)
+  target_link_libraries(test_proxy PRIVATE edgemesh_http)
+  target_compile_options(test_proxy PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+  add_test(NAME proxy_integration COMMAND test_proxy $<TARGET_FILE:edgemesh-backend>)
+  set_tests_properties(proxy_integration PROPERTIES TIMEOUT 20)
+endif()
