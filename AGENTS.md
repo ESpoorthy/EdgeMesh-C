@@ -37,7 +37,7 @@ They are the shared source of truth for implementation, Sigma UI/UX design and t
 
 ## Dashboard rules
 
-Follow the approved Sigma screens when available. Keep routing/proxy state in C and presentation/API access in React. Use documented paths and schemas; do not invent routes. Mark fixtures as sample data in design-only contexts. Integrated live values come from the API. Include loading, disconnected/error, empty and unhealthy states. Poll no faster than once every two seconds and clean up timers/requests.
+Follow the approved Sigma screens and Figma design contract in `docs/requirements.md`, `docs/architecture.md` and the React + TypeScript Handoff frame. The runtime has exactly three screens: Overview (`/`), Backend Health (`/backends`) and Benchmark Lab (`/benchmarks`); Design System and handoff are references, not routes. Preserve the dark technical visual identity and shared design tokens. Keep routing/proxy state in C and presentation/API access in React. Use only the six documented backend endpoints; do not invent routes. Keep design/test fixtures visibly labeled and isolated from live data. Never invent `Recovered` as a server state or API field; a transient UI recovery cue requires observing unhealthy then healthy. Distinguish admin API health, proxy readiness, backend health and client-observed API connectivity. Include loading, stale, disconnected/error, empty/no-result and unhealthy/unknown states. Poll no faster than once every two seconds and clean up timers/requests.
 
 ## Planned build/test workflow
 

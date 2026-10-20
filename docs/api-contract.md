@@ -1,6 +1,6 @@
 # EdgeMesh-C Administrative API Contract
 
-**Version:** 1.2 (MVP) · **Base URL:** `http://127.0.0.1:9090` · **Encoding:** UTF-8 JSON
+**Version:** 1.3 (MVP) · **Base URL:** `http://127.0.0.1:9090` · **Encoding:** UTF-8 JSON
 
 Allowed browser origins: `http://localhost:5173`, `http://127.0.0.1:5173`. This contract is the source of truth for the dashboard, tests and C API.
 
@@ -34,7 +34,7 @@ OPTIONS is preflight only; it does not add an API data route. For an allowed Ori
 
 ## 2. `GET /api/v1/health`
 
-HTTP 200 indicates the admin process/API responds; it does not assert backend health.
+HTTP 200 with `status: "ok"` indicates the administrative API is responding. It does not assert proxy listener readiness or backend health. Dashboard administrative connectivity is its own client-observed state based on actual API requests; it is not returned by this endpoint.
 
 ```json
 {"status":"ok","service":"edgemesh-c","version":"0.1.0","uptime_seconds":128}
@@ -73,6 +73,8 @@ HTTP 200 snapshot. Aggregate metric window is always 60 seconds.
 
 `requests_total`, `responses_forwarded_total`, `proxy_failures_total`, `client_rejections_total`, `client_disconnects_total` and `response_bytes_total` are process-lifetime cumulative counters. `active_connections` is the current number of admitted proxy client sockets, including header parsing; `active_requests` is the current number of valid parsed proxy requests in progress. Neither includes admin or health-check sockets. `latency_samples` is the number retained in the 60-second interval and used for percentiles. Rates use the rolling window and its specified denominator. No samples => percentile `null`; no traffic => rates are zero.
 
+`proxy_running` is true only while the proxy listener is initialized and accepting connections; it is independent of admin API health and backend health. The UI must not infer the dashboard's admin connectivity from this flag.
+
 ## 4. `GET /api/v1/backends`
 
 HTTP 200; includes all three configured backends in stable ID order.
@@ -82,13 +84,17 @@ HTTP 200; includes all three configured backends in stable ID order.
   "backends":[
     {"id":"backend-1","address":"127.0.0.1:9001","state":"healthy",
      "active_connections":1,"requests_total":180,"responses_forwarded_total":178,
-     "attempt_failures_total":2,"last_check_at":"2026-10-19T05:29:59Z","last_probe_ms":1.7}
+     "attempt_failures_total":2,"attempts_per_second":3.0,"traffic_percentage":33.3,
+     "last_check_at":"2026-10-19T05:29:59Z","last_probe_ms":1.7}
   ],
+  "traffic_window_seconds":60,
   "generated_at":"2026-10-19T05:30:00Z"
 }
 ```
 
-The example shows one entry; a real response has exactly three. State is `healthy`, `unhealthy` or `unknown`. Counts are lifetime counts; last probe fields (`last_check_at`, `last_probe_ms`) are `null` before a probe completes. `requests_total` counts attempts to that backend, including retries; `attempt_failures_total` counts failed/incomplete exchanges against that backend. Probe traffic is not included in request counts or rates.
+The example shows one entry; a real response has exactly three in stable ID order. State is exactly `healthy`, `unhealthy` or `unknown`; the server does not return `Recovered`, recovery history or recovery timestamps. Counts are lifetime counts; last probe fields (`last_check_at`, `last_probe_ms`) are `null` before a probe completes. `requests_total` counts dispatched attempts to that backend, including retries; `attempt_failures_total` counts failed/incomplete upstream exchanges against that backend. Probe traffic is excluded.
+
+The response-level `traffic_window_seconds` is always `60` seconds (maximum observation window). Per backend, `attempts_per_second` is a JSON number measured in attempts/second: the actual dispatched-attempt delta in the UTC-aligned one-second buckets intersecting `[generated_at - 60 seconds, generated_at)`, including the current in-progress bucket, divided by `min(60, process_uptime_seconds)`. It measures actual user-request backend attempts, including failed attempts/retries; a request returning 503 before dispatch adds no backend attempt. One-second bucket resolution applies. `traffic_percentage` is a JSON number from 0 through 100, or `null` when the denominator is zero; it is the backend's same-window attempt delta divided by the sum of all three backend attempt deltas in the same window, multiplied by 100. If that sum is zero, `attempts_per_second` is `0.0` and `traffic_percentage` is `null` for every backend. Otherwise percentages total 100 before rounding (rounded to one decimal in JSON). Do not derive these values from lifetime counters or fixture data.
 
 ## 5. `PUT /api/v1/policy`
 
@@ -168,7 +174,12 @@ All numbers above are illustrative schema only. A real run records actual values
 - `response_bytes_total` includes proxy-generated errors and all upstream response bytes actually written to client sockets, including partial/incomplete responses; `responses_forwarded_total` increments only for a complete valid response fully written. `response_bytes_per_second` divides window bytes by `min(window_seconds, process_uptime_seconds)`; idle time counts as zero and no traffic yields zero rate.
 - Rolling overview rates use the latest 60 seconds; metrics endpoint uses the requested interval. Bucket rates use the fixed one-second bucket duration. Percentiles are computed over samples in the respective interval, up to the 100,000-sample retention cap.
 - JSON numeric durations/rates may be rounded to one decimal place; counters are exact integers.
+- Per-backend `attempts_per_second` uses actual attempt deltas from the latest 60 UTC-aligned one-second buckets intersecting the interval, including the current bucket; rate denominator is `min(60, process_uptime_seconds)`. Traffic percentage uses the same attempt sums; zero total attempts produces `null`, otherwise the three percentages sum to 100 before rounding.
 
 ## 9. Dashboard behavior and contract tests
 
-Poll no faster than every two seconds. Treat `null`, empty points and `available:false` as unavailable/empty, not zero or fabricated data. Test success and failure for each route, methods, unknown paths/query keys, invalid and oversized bodies, CORS origin behavior, empty/populated benchmark files, schema errors, and consistency with TypeScript types.
+Implement exactly the three designed app screens/routes: Overview (`/`), Backend Health (`/backends`) and Benchmark Lab (`/benchmarks`). Design System and React + TypeScript Handoff are implementation references, not runtime routes. Preserve the approved shared dark navy/charcoal shell, compact sidebar, dense cards/charts, light text, cyan/teal emphasis, restrained amber status accents and Design System tokens. Use these data bindings: Overview uses `/health`, `/overview`, `/backends` and `/metrics?window_seconds=60`; Backend Health uses `/backends` plus the successful PUT response from `/policy`; Benchmark Lab uses `/benchmarks/latest` only. The six documented application endpoints remain the entire API surface; frontend paths are local navigation.
+
+Represent admin API health (`/health`), proxy readiness (`proxy_running`), each backend's server state (`healthy|unhealthy|unknown`) and dashboard-to-admin connectivity (client-observed request state) independently. `Recovered` is not a server field/state; show it only in labeled prototype data or as a transient UI cue after the client observes an unhealthy-to-healthy transition. No server recovery history/timestamp exists. Keep fixtures visibly marked `PROTOTYPE DATA` and separate from live adapters; live screens use only response values. Benchmark Lab shows the latest saved result or the `available:false` empty state; it does not start runs or show run history. Include loading, stale, disconnected, error, empty/no-result, unhealthy and unknown states as applicable. Never render null values as measured zero.
+
+Poll no faster than every two seconds. Treat `null`, empty points and `available:false` as unavailable/empty, not zero or fabricated data. Test success and failure for each route, methods, unknown paths/query keys, invalid and oversized bodies, CORS origin behavior, backend-rate formula/zero-traffic behavior, empty/populated benchmark files, schema errors, and consistency with TypeScript types.

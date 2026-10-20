@@ -1,6 +1,6 @@
 # EdgeMesh-C Test Plan
 
-**Specification:** 1.2 (MVP) · **Environment:** macOS, C17, CMake, CTest
+**Specification:** 1.3 (MVP) · **Environment:** macOS, C17, CMake, CTest
 
 ## 1. Test strategy
 
@@ -35,6 +35,7 @@ Use a separate ASan/UBSan build when supported. Keep deterministic integration p
 | Health | Unknown initial; threshold failures/successes; alternating result | Transitions only at 3 failures / 2 successes; opposite count resets |
 | Metrics | No data, one sample, nearest-rank values, window expiry, idle intervals, partial response bytes, bounded rings and ring overwrite | Empty rates are zero; percentiles are null if no samples; rolling denominator is `min(window, uptime)`; bucket denominator is one second; only closed observed buckets appear; partial bytes count, incomplete responses do not count forwarded; sample count matches retained cohort |
 | Probe accounting | Healthy/failing health checks while proxy metrics are sampled | Probe requests, bytes, errors and latency never alter traffic counters, rates or percentiles; request failures alone do not change health state |
+| Backend traffic rates | Seed backend attempt counters/events with known timestamps; test successes, failures, retries, short uptime, idle interval and zero-attempt window | `/backends` declares a 60-second window; rate equals same-window backend dispatch attempts divided by `min(60, uptime)`; percentage uses that backend's attempts divided by all three backends' same-window attempts; failures/retries are included, probes excluded; zero total => all rates 0.0 and percentages null; with nonzero total percentages sum to 100 before one-decimal rounding |
 | Admin validation | Route/method/query, policy schema, wrong type, unknown fields, trailing JSON, >4 KiB, content type | Expected status and error envelope; rejected mutation preserves policy |
 | JSON | Quotes, backslashes and control bytes | Valid escaped JSON, no truncation or injection |
 
@@ -57,6 +58,9 @@ Use a separate ASan/UBSan build when supported. Keep deterministic integration p
 | INT-13 | No benchmark / valid / corrupt saved file; launch from different working directories | daemon and benchmark use same absolute `--results-dir`; `latest.json` is found independent of CWD and the daemon fails startup for a missing/inaccessible configured directory; `available:false` if absent; valid data is returned; corruption gives safe 500 without exposing path |
 | INT-14 | Dashboard API outage, empty series, null percentiles | Disconnected and empty states appear; UI does not substitute live-looking values |
 | INT-15 | Shutdown under load | Listeners close, workers join or stop predictably, sockets/reservations released |
+| INT-16 | Backend rates and traffic mix shown on Overview and Backend Health | Both screens consume `/api/v1/backends`; rates/percentages match API's measured 60-second window; zero traffic displays unavailable mix, not fabricated percentages |
+| INT-17 | Health/connectivity and recovery-state separation | Admin health, `proxy_running`, backend states and dashboard request connectivity render independently; no server `Recovered` field is accepted; client recovery cue requires observed unhealthy-to-healthy transition |
+| INT-18 | Figma screen and fixture contract | Only Overview, Backend Health and Benchmark Lab are application routes; Design System/Handoff are references; prototype fixtures are visibly labeled and isolated from live API data; no benchmark-start/history route is called |
 
 Failure tests should use controllable backend behavior or terminate the backend process, not depend on timing from an external service. Allow scheduler tolerance listed in requirements. Verify each proxy status mapping: malformed input 400, unsupported method 405 plus `Allow: GET`, unsupported version 505, request-line/target >8 KiB 414, headers >16 KiB 431, body framing 413, 2-second header timeout 408, no healthy backend 503, and exhausted upstream failure 502 only if no response has started; after output starts assert close without a second response. At capacity, assert close without response.
 
