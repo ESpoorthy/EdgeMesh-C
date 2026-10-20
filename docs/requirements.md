@@ -1,112 +1,135 @@
 # EdgeMesh-C Requirements
 
-**Version:** 1.0 — MVP specification  
-**Target environment:** macOS  
-**Primary language:** C17  
-**Build/test:** CMake and CTest
+**Specification:** 1.3 (MVP) · **Target:** macOS · **Core:** C17/POSIX sockets · **Build/test:** CMake/CTest
 
-## 1. Product goal
+## 1. Goal and scope
 
-EdgeMesh-C is an educational, C-first HTTP reverse proxy and load balancer. It distributes requests across three configured local backends, checks backend health, avoids unhealthy backends, records real performance metrics and exposes a local JSON API for a React + TypeScript dashboard. A repeatable C benchmark client compares behaviour under defined workloads.
+EdgeMesh-C is an educational C-first HTTP reverse proxy and load balancer. It routes a deliberately small HTTP/1.1 request subset across three local demonstration backends, removes failed backends from service, measures real traffic, and exposes a local JSON API consumed by a separate React + TypeScript dashboard. A repeatable C benchmark client records actual runs.
 
-This is a course project prototype, not a production-grade general-purpose proxy.
+This is a demonstrable prototype, not a general purpose or production proxy. The target schedule is approximately 12 days; finish a reliable narrow slice before adding polish.
+
+**Included:** proxy on `127.0.0.1:8080`; admin API on `127.0.0.1:9090`; three local backends on ports 9001–9003; round-robin and least-connections; active health checking and failover; counters, latency and bounded time-series data; C benchmark client; dashboard; unit, integration and backend-failure tests.
+
+**Excluded:** TLS termination, HTTP/2, HTTP/3, WebSockets, CONNECT, upgrades, request bodies, keep-alive/persistent client connections, arbitrary backend registration or forwarding, authentication infrastructure, Kubernetes, cloud deployment, distributed operation and AI features.
 
 ## 2. Fixed topology
 
-One C application process owns two separate listeners:
-
-| Component | Listen address | Purpose |
+| Process/component | Bind/target | Responsibility |
 |---|---|---|
-| Proxy | 127.0.0.1:8080 | Client HTTP traffic |
-| Admin API | 127.0.0.1:9090 | Dashboard metrics and policy updates |
+| C proxy listener | `127.0.0.1:8080` | Client requests |
+| C administrative listener | `127.0.0.1:9090` | Read-only status/metrics and policy update |
+| Demo backend 1 | `127.0.0.1:9001` | Identifiable deterministic response with `X-Backend-ID: backend-1` |
+| Demo backend 2 | `127.0.0.1:9002` | Identifiable deterministic response with `X-Backend-ID: backend-2` |
+| Demo backend 3 | `127.0.0.1:9003` | Identifiable deterministic response with `X-Backend-ID: backend-3` |
+| Dashboard dev server | `http://localhost:5173` or `http://127.0.0.1:5173` | API client and presentation |
 
-Three separate demo backend instances listen at 127.0.0.1:9001, 127.0.0.1:9002 and 127.0.0.1:9003. Each backend returns a small response identifying itself. Backend addresses are fixed in local configuration; clients cannot provide arbitrary upstream destinations.
-
-The dashboard development server is expected at http://localhost:5173 or http://127.0.0.1:5173.
+One C application process owns both listeners. Each demo backend returns its ID in the response header `X-Backend-ID` and body for normal GETs; `GET /health` returns a complete 200 response with body `ok`. The backends, benchmark client and dashboard are separate processes. Backend targets are fixed local configuration; an incoming request can never select its own destination.
 
 ## 3. Functional requirements
 
-### FR-01 — HTTP proxy
-- Support a deliberately limited HTTP/1.1 subset: origin-form GET requests, bounded headers, one request per client connection and Connection: close.
-- Require a valid request line and valid header syntax; maximum request-header section is 16 KiB.
-- Preserve the path and query string when forwarding to a selected configured backend.
-- Use bounded connection/read timeouts and correctly handle partial reads and writes.
-- Return clear errors for malformed, oversized or unsupported requests.
-- Do not claim full HTTP/1.1 conformance. Request bodies, chunked request bodies, persistent connections, WebSockets, CONNECT, upgrades and arbitrary absolute URLs are out of scope.
+### FR-01 — Limited HTTP proxy
 
-### FR-02 — Load balancing
-- Support exactly two MVP policies: round_robin and least_connections.
-- Round robin rotates through eligible healthy backends.
-- Least connections chooses the healthy backend with the fewest in-flight proxy requests; ties are resolved deterministically with rotation.
-- Backend selection and reservation of an in-flight count must be thread-safe.
-- If no backend is healthy, return HTTP 503 Service Unavailable.
+- Parse one request per TCP connection. Accept only `GET`, origin-form targets beginning with `/`, and HTTP/1.1. A target must not contain a fragment, control characters, or an absolute authority. Preserve its path and query exactly.
+- Require exactly one syntactically valid `Host` header. Reject request bodies: reject any `Transfer-Encoding`; accept `Content-Length` only when absent or exactly `0`. Reject duplicate/conflicting `Host` or `Content-Length`.
+- Maximum complete request header section is 16 KiB, including CRLF delimiters. Header names follow HTTP token syntax; values may not contain bare control characters. Bound individual request-line length to 8 KiB.
+- Require `Connection: close` semantics from the proxy: it always closes the client connection after one response. Forward only the request line and safe end-to-end headers; remove hop-by-hop headers and do not forward client `Connection` or `Proxy-Connection`. Add/replace `Host` with the configured backend authority and send `Connection: close` upstream.
+- Apply bounded connect/read/write timeouts (defaults in architecture). Handle partial reads/writes. Never hold a shared-state lock across I/O.
+- Return the exact status mapping below. Client input rejection is separate from proxy failure accounting.
+- Responses are closed after one message. Parse a bounded status/header section; accept a final status from 200 through 599 on HTTP/1.0 or HTTP/1.1, and either one valid `Content-Length` or a close-delimited body. Reject informational 1xx responses, `Transfer-Encoding`, duplicate/conflicting lengths and malformed responses in the MVP. Forward the status and end-to-end headers/body, excluding hop-by-hop headers, and enforce configured header/body/time limits. An upstream failure yields 502 if no upstream response bytes reached the client; after any response bytes were sent, close the connection and record a failed request without attempting another backend. An incomplete upstream response counts as a failed backend attempt and final proxy failure; partial bytes actually written still count in `response_bytes_total`. A downstream write failure counts only as a client disconnect, not as a backend attempt failure.
 
-### FR-03 — Health checking and failover
-- Periodically probe all configured backends using bounded timeouts.
-- Track healthy, unhealthy or unknown state, last-check timestamp and probe latency when available.
-- Use documented consecutive-failure and consecutive-success thresholds to avoid flapping.
-- Exclude unhealthy backends from new selections and return recovered backends to service after the recovery threshold.
-- Do not block the entire proxy while a probe is waiting on network I/O.
+| Condition | Proxy response/action |
+|---|---|
+| Malformed request line, header syntax, Host, or invalid/ambiguous framing | 400 Bad Request |
+| Valid method other than GET | 405 Method Not Allowed, `Allow: GET` (method check takes precedence over body framing) |
+| Valid request line with HTTP version other than HTTP/1.1 | 505 HTTP Version Not Supported |
+| Request target/request line exceeds 8 KiB (checked before aggregate header size) | 414 URI Too Long |
+| Header section exceeds 16 KiB after request-line check | 431 Request Header Fields Too Large |
+| GET request with body framing (`Transfer-Encoding` or nonzero `Content-Length`) | 413 Content Too Large |
+| Client does not finish request headers within 2 seconds | 408 Request Timeout |
+| No healthy backend at selection time | 503 Service Unavailable |
+| All upstream attempts fail before any response byte is sent to the client | 502 Bad Gateway; if a response already started, close the connection and do not send a second response |
+| Proxy is at its connection cap | Close the newly accepted socket without a response |
 
-### FR-04 — Real metrics
-Collect request totals, successfully forwarded responses, proxy failures, active requests, per-backend request counts, response bytes, request latency and a bounded time series.
-- A successfully forwarded response is a valid upstream HTTP response received and forwarded; upstream 4xx/5xx responses are still forwarded responses.
-- A proxy failure includes no healthy backend, connect/read timeout, or invalid/incomplete upstream response. Track rejected client input separately where practical.
-- Proxy latency starts after request headers are parsed and ends when the upstream response has been forwarded.
-- Define p50/p95/p99 over the documented rolling sample window. If no samples exist, return null, not a fabricated zero.
-- Bound metrics history and retained latency samples.
+Proxy-generated error responses have `Content-Type: text/plain; charset=utf-8`, a small fixed body, `Content-Length`, `Connection: close`, and no reflected request data. Error serialization must fit within the request deadline.
 
-### FR-05 — Administrative JSON API
-Implement the endpoints in api-contract.md and keep request/response schemas consistent with the frontend and tests. Use appropriate HTTP status codes and a common JSON error envelope.
+This is a small, documented subset, not full HTTP/1.1 compliance.
+
+### FR-02 — Policies
+
+- Support exactly `round_robin` and `least_connections`.
+- Both consider healthy backends only. Round robin advances from the last selected slot and skips unhealthy entries.
+- Least-connections selects the backend with the fewest in-flight proxy requests. Ties use a rotating cursor for deterministic fair selection.
+- Selection and increment of the chosen backend's in-flight reservation are atomic under shared-state synchronization. Release the reservation exactly once on every exit path.
+- On an upstream connect/write/read/protocol failure, mark that backend attempt failed and retry another currently healthy backend only if zero upstream response bytes have been sent to the client. Attempt each backend at most once, for at most three total candidates. Each attempt has a 2-second total deadline and the whole accepted request has a 9-second deadline from accept, with at least 1 second reserved for the final error response. A valid upstream HTTP error response (4xx/5xx) is forwarded and is not a proxy failure. Proxy-attempt failures are counted but only health-probe thresholds change backend health state.
+
+### FR-03 — Health and failover
+
+- A worker probes each configured backend independently every 1 second with a 250 ms total probe deadline, requesting `GET /health` and accepting only a complete 2xx response with at most 1 KiB of headers and 1 KiB of body.
+- Initially state is `unknown`. Three consecutive failures transition to `unhealthy`; two consecutive successes transition to `healthy`. Reset the opposing counter on each result. Only healthy backends receive new work.
+- Publish the last completed probe timestamp and latency. Do not perform network I/O while holding backend-state locks.
+- Within the default settings, a stopped backend should leave selection within 3.5 seconds (three intervals plus probe timeout); a recovered backend should re-enter within 2.5 seconds (two intervals plus timeout). Tests allow scheduler tolerance up to 5 seconds and 4 seconds respectively.
+
+### FR-04 — Measured metrics
+
+- Record completed proxy requests, forwarded upstream responses, proxy failures, rejected client requests separately, current admitted proxy client connections, current valid active requests, per-backend counts, response bytes, latency samples and bounded time series.
+- `active_connections` is the current number of admitted proxy client TCP connections, including clients whose headers are still being parsed; it is decremented on every close path. `active_requests` counts valid parsed requests still being processed, including ones ending in client disconnect. Neither includes admin or health-check connections.
+- `requests_total` counts valid parsed requests that reach a proxy result (complete upstream response, 502 or 503), whether forwarded or failed. `client_rejections_total` counts malformed, unsupported, oversized, and timed-out request input. `client_disconnects_total` counts valid clients disconnecting before the proxy completes its response; disconnects are excluded from `requests_total` and `proxy_failures_total`. `responses_forwarded_total` counts complete valid upstream responses fully written to the client, including upstream 4xx/5xx. `proxy_failures_total` counts final failed valid requests (no healthy backend or upstream failure after retry); it increments once per request, not per attempt.
+- A backend's `requests_total` counts attempts made to it; its `responses_forwarded_total` counts complete valid upstream responses fully written through it; its `attempt_failures_total` counts failed attempts, including an incomplete upstream response. Across retries, backend attempt totals may exceed process request totals.
+- Each metrics bucket retains the dispatched attempt delta for each backend. The `/backends` summary includes retained closed buckets and the current in-progress bucket intersecting the latest 60 seconds, at one-second bucket precision; health probes are never included.
+- `GET /api/v1/backends` additionally exposes `attempts_per_second` and `traffic_percentage` from actual backend-attempt deltas in the fixed rolling 60-second window. At one-second bucket precision, rate is attempts divided by `min(60, process_uptime_seconds)`; traffic percentage is this backend's attempts divided by attempts to all configured backends in the same window, times 100. Failed attempts are included because selection/dispatch, not success, defines a backend attempt. With no backend attempts or zero denominator the rate is `0.0` and percentage is `null`; do not invent a percentage. The response declares `traffic_window_seconds: 60`.
+- Probe traffic is excluded from all user-facing request, response, failure, byte, latency, and rate metrics. Probe state, timestamp and latency appear only in backend health fields.
+- Request latency begins after request headers are fully parsed and ends when the response is fully forwarded or the valid request reaches a terminal 502/503 failure. Client-input rejection and client disconnect have no proxy latency sample. A response that begins but is incomplete contributes a failure latency sample.
+- Overview rolling rates use a 60-second window; `/metrics` uses its requested 10–300 second window. Divide window totals by `min(window_seconds, process_uptime_seconds)`; idle seconds count as zero traffic. Thus no observations yield a rate of 0 and percentile `null`.
+- The series consists of closed, UTC-aligned one-second buckets. Emit only buckets with valid proxy outcomes, client rejections or disconnects. Each bucket rate is its valid request/response byte delta divided by 1.0 second; no missing bucket is fabricated. Its cumulative counters are snapshots at bucket end. Percentiles use nearest-rank over latency samples in that bucket. The rolling overview percentiles use samples in the rolling window.
+- Retain each configured backend's dispatched user-request attempt delta in every metrics bucket, including failed attempts and retries. Exclude probes. The latest closed-bucket attempt deltas are the source for `GET /api/v1/backends` rate and distribution fields.
+- `response_bytes_total` counts all response bytes successfully written to proxy clients, including proxy-generated errors and partial upstream responses; it includes status line, headers and body. An incomplete upstream response does not increment `responses_forwarded_total`, even if some bytes reached the client. `response_bytes_per_second` uses the same byte total and window denominator above.
+- Retain at most 3,600 one-second buckets and 100,000 timestamped latency samples in fixed-size rings. Percentiles use retained samples in the requested interval; expose the sample count so consumers can see the population used. JSON counters saturate at `9,007,199,254,740,991` (the largest exactly representable JavaScript integer).
+- All accepted valid proxy requests receive exactly one terminal outcome. A client disconnect is counted separately, excluded from `requests_total` and `proxy_failures_total`, and is not also a client rejection. A rejected request is not counted in `requests_total`.
+
+### FR-05 — Admin JSON API
+
+Implement exactly the routes and schemas in `api-contract.md`. The API is local-only, validates request method/path/query/body and enum values, returns the shared error envelope, and never accepts arbitrary upstream URLs, file paths or commands. Each response closes its connection.
 
 ### FR-06 — Benchmark client
-- Provide a C command-line load generator for the local proxy with bounded request-count and concurrency options.
-- Record configuration, requested/completed/failed requests, wall-clock duration, requests per second, response bytes per second and p50/p95/p99 latency.
-- Save actual completed-run results in JSON and/or CSV.
-- Do not fabricate results; unavailable measurements must be represented explicitly.
 
-### FR-07 — Dashboard
-- Implement Overview, Backend Health and Benchmark Lab screens.
-- Use API responses for live values. Sample values may be used only in the design prototype or isolated frontend tests and must not be presented as live data.
-- Display loading, disconnected, errors, empty results and unhealthy-backend states.
-- Allow policy changes through the API and display whether the operation succeeded.
+Provide a C CLI targeting only `http://127.0.0.1:8080/` with an optional origin-form path. Accept 1–100,000 requests and concurrency 1–128; reject invalid values. Each benchmark request has a 10-second total connect/write/read deadline, longer than the proxy request deadline. A completed benchmark request is a complete parseable HTTP response with status 200–499; failed includes transport error, malformed/incomplete response or status 500–599. Report requested, completed, failed, wall-clock duration from first dispatch until all requests are terminal, RPS (`completed / duration`), response bytes/s (`bytes read / duration`), p50/p95/p99 for completed requests and backend distribution from the recognized `X-Backend-ID` response header (responses without a known ID are not attributed to a backend). `response_bytes` is the number of response bytes actually read, including partial failed responses. Save actual completed run data as JSON. A run is complete once every requested task has a terminal result, even if some requests failed. The daemon and benchmark require the same absolute `--results-dir` startup setting; the admin API reads only `<results-dir>/latest.json` and never takes a caller-supplied path. Never invent values; unavailable percentiles are `null`.
 
-## 4. Non-functional requirements
+### FR-07 — Dashboard and approved Figma design contract
 
-- C17 is the implementation language for proxy, admin API, demo backend and benchmark client. React + TypeScript is only the presentation layer.
-- Use POSIX/BSD sockets and pthreads supported by macOS; isolate platform-specific behaviour.
-- Use CMake and CTest. Enable strong compiler warnings and use sanitizers where supported.
-- Validate lengths and values; check system-call results; handle partial I/O, disconnects and timeouts; avoid unbounded buffers and unchecked allocation.
-- Synchronise backend state, policy, active-connection reservations and metrics. Do not hold global locks during network I/O.
-- Log health transitions and errors without logging arbitrary sensitive headers.
-- Document build, run, test and benchmark commands.
+- Implement exactly three application screens/routes: Overview (`/`), Backend Health (`/backends`) and Benchmark Lab (`/benchmarks`). Design System and React + TypeScript Handoff are reference/specification frames, not fourth/fifth runtime routes.
+- Preserve the approved Figma structure and identity: shared dark navy/charcoal application shell with compact left navigation, dense technical cards and charts, light text, cyan/teal emphasis, restrained amber warning/failure accents, and consistent spacing/type/color tokens from the Design System. Do not invent replacement visual styling or add screens.
+- Bind only the six API routes in `api-contract.md`. Overview consumes health, overview, backends and metrics; Backend Health consumes backends and policy read/write; Benchmark Lab consumes latest benchmark only. Frontend navigation remains local and never becomes an admin API path.
+- Keep API health (admin service answers `/health`), proxy readiness (`proxy_running` is true only when the proxy listener is initialized and accepting connections), individual backend health (`healthy|unhealthy|unknown`), and client-observed administrative API connectivity (dashboard request connected/disconnected/error state) distinct. One must not be inferred from another.
+- The server never returns `Recovered`. A design fixture may illustrate that presentation state, or a connected client may show a transient recovery cue only after it has itself observed `unhealthy` followed by `healthy`; live backend `state` remains exactly `healthy`, `unhealthy` or `unknown`. Do not claim server-provided recovery history or timestamps.
+- Keep prototype fixtures isolated from live API data and visibly labeled `PROTOTYPE DATA`/illustrative. Remove or disable fixture adapters when live API integration is active. Treat missing values as unavailable, not zero; no benchmark result is an explicit empty state. Benchmark Lab only reads the latest CLI-produced result; no in-dashboard action may claim to start a run. There is no benchmark-start, benchmark-history or recovery-history endpoint.
+- Show loading, stale, disconnected, API error, empty/no-result and backend unhealthy/unknown states as appropriate; poll no faster than once every 2 seconds and cancel requests/timers on unmount.
 
-## 5. Local security boundaries
+## 4. Non-functional and security requirements
 
-- Bind proxy and admin listeners to loopback only by default.
-- Backend targets are fixed to the configured local pool; no open-proxy or arbitrary URL-fetching capability.
-- Bound header sizes, admin body sizes, connections and metric history.
-- Allow only the documented local dashboard origins for browser CORS and never use wildcard CORS for policy-changing routes.
-- CORS is not authentication and loopback is not a boundary against other local processes running as the same user. Do not expose the admin API publicly or claim production-grade security.
-- TLS termination, HTTP/2, authentication infrastructure, cloud deployment and Kubernetes are out of scope.
+- C17 for proxy, API, demo servers and benchmark; POSIX/BSD sockets and pthreads on macOS; CMake/CTest. Use strong warnings and sanitizers where available.
+- Check system calls and allocations; handle partial I/O, EINTR, disconnects, timeouts, shutdown and cleanup. Bound parsing, bodies, buffers, worker/connection counts, history and benchmark parameters.
+- Synchronize policy, backend health, reservations and metrics. Avoid global locks during network operations. Escape JSON strings correctly.
+- Capacity defaults: at most 128 concurrent proxy client connections, 8 concurrent admin connections and listen backlog 64 per listener. Close newly accepted sockets promptly when at capacity without parsing them or sending a response. These are configuration constants, not dashboard controls.
+- Both listeners bind explicitly to IPv4 loopback (`127.0.0.1`), never wildcard or LAN interfaces. Backend connection targets are a compile-time/default fixed three-entry loopback pool; if ports are made configurable for tests, accept only validated loopback addresses and reject any non-loopback host.
+- Admin body maximum 4 KiB; headers maximum 16 KiB. CORS allows only the two dashboard origins in the topology, reflects the exact allowed origin with `Vary: Origin`, and never uses `*`. CORS is not authentication; any local process may call loopback. Do not expose port 9090 externally or claim production security.
+- Do not read caller-selected files, execute commands, fetch arbitrary URLs, or log sensitive arbitrary headers. At startup the daemon and benchmark receive the same required absolute `--results-dir`; canonicalize it once and use only its `latest.json` child. The directory must exist and be accessible; otherwise startup fails. The API accepts no path. Validate the file schema and 64 KiB maximum size.
 
-## 6. Acceptance criteria
+## 5. Measurable acceptance criteria
 
-1. A clean checkout builds on macOS using documented CMake commands.
-2. A request through the proxy receives a valid response from a configured demo backend.
-3. Both policies can be selected; invalid values are rejected without changing the current policy.
-4. Round robin rotates across healthy backends under a sequential test workload.
-5. Least connections uses tracked in-flight counts with deterministic tie-breaking.
-6. Stopping a backend marks it unhealthy within the configured probe threshold; remaining healthy backends continue serving requests.
-7. If all backends are unavailable, a valid HTTP 503 is returned.
-8. All six documented admin endpoints return schema-conforming JSON and documented errors.
-9. Counters and latency metrics change in response to real requests.
-10. The benchmark client writes actual results and their configuration to a result file.
-11. Tests cover malformed requests, policy changes, failure/recovery and the no-healthy-backend path.
-12. The dashboard reads live API data and handles API disconnection and missing results.
+1. A clean macOS checkout builds with the documented CMake/C17 workflow and CTest discovers the documented test suites.
+2. A valid GET through port 8080 returns a valid identifiable demo-backend response; malformed syntax/Host/invalid framing => 400, unsupported method => 405 plus `Allow: GET`, unsupported version => 505, target/request line >8 KiB => 414, headers >16 KiB => 431, GET body indicators => 413, and incomplete headers at 2 seconds => 408.
+3. Sequential equal-backend round-robin requests distribute counts within one request; unhealthy entries are skipped.
+4. Least-connections chooses the lowest live in-flight count; ties rotate deterministically in controlled tests.
+5. A failed backend stops receiving new selections within the specified probe bound; remaining backends serve traffic; recovery returns it after threshold.
+6. All unhealthy backends => HTTP 503. Upstream attempts have 2-second total deadlines, retry each other eligible backend at most once only before response bytes reach the client, and stay within the 9-second accepted-request deadline; exhausted failures => 502 if no response started.
+7. All six API routes match the schemas and error rules in `api-contract.md`; invalid policy leaves state unchanged.
+8. Real successful, failed, rejected and disconnected requests change only their specified counters; health probes do not affect traffic metrics; no-data percentile values are null; active reservations return to zero after completion/failure/disconnect.
+9. Benchmark output contains actual run configuration and counts; reported rates/percentiles can be recomputed from the saved raw/summary data or are explicitly unavailable.
+10. `/api/v1/backends` rates and percentages match measured per-backend attempt deltas over the declared 60-second window; zero denominator produces null percentages, not fabricated distribution.
+11. Dashboard live values come from the API; its three application routes follow the Figma contract, distinguish admin/proxy/backend/connectivity states, isolate labeled fixtures and do not imply benchmark start/history APIs.
+12. Unit, integration, backend stop/restart and all-backends-down tests pass. Evidence must identify actual commands/results; writing this spec is not evidence of a pass.
+13. The daemon and benchmark load/write only `<absolute --results-dir>/latest.json`, even when launched from a different working directory; the API never accepts a file path.
 
-Record commands and results as evidence. Source code existing is not proof that a criterion passed.
+## 6. Deadline priorities
 
-## 7. Explicitly deferred
-
-TLS, HTTP/2, persistent connections, request-body forwarding, WebSockets, dynamic arbitrary backend registration, distributed operation, production authentication, autoscaling, deployment infrastructure and complex animation.
+Days 1–2: contracts and build skeleton. Days 3–5: bounded parser, proxy and demo backends. Days 6–7: selector, health and failover. Days 8–9: admin API and real metrics. Days 10–11: integration/failure tests, benchmark and minimal dashboard integration. Day 12: reproducible demo, defect fixes and evidence. If time slips, prioritize correctness, test coverage and documented limitations over extra UI polish or throughput optimization.
