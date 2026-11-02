@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#080d18" />
+  <meta name="description" content="EdgeMesh-C is a C17 HTTP reverse proxy and load balancer with health monitoring, automatic failover, traffic metrics, and an interactive routing preview." />
+  <title>EdgeMesh-C — Resilient Routing at the Edge</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #080d18;
+      --panel: #101a2b;
+      --panel-2: #142238;
+      --line: rgba(151, 181, 218, .15);
+      --text: #edf5ff;
+      --muted: #91a4be;
+      --cyan: #54d7ee;
+      --blue: #739cff;
+      --green: #54dfa4;
+      --amber: #f3bd67;
+      --red: #ff777e;
+      --radius: 18px;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .28);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background:
+        radial-gradient(ellipse at 75% 2%, rgba(48, 120, 183, .17), transparent 34rem),
+        radial-gradient(ellipse at 6% 24%, rgba(30, 174, 183, .10), transparent 28rem),
+        var(--bg);
+      color: var(--text); font: 15px/1.6 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    a { color: inherit; text-decoration: none; }
+    button, select { font: inherit; }
+    .wrap { width: min(1160px, calc(100% - 40px)); margin: 0 auto; }
+    .nav { display:flex; align-items:center; justify-content:space-between; min-height:78px; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:11px; font-weight:750; letter-spacing:-.03em; font-size:18px; }
+    .brand-mark { display:grid; place-items:center; width:35px; height:35px; border:1px solid rgba(84,215,238,.5); border-radius:11px; color:var(--cyan); background:rgba(84,215,238,.08); font-size:17px; }
+    .brand small { display:block; color:var(--muted); font-size:10px; font-weight:600; letter-spacing:.15em; }
+    .nav-links { display:flex; align-items:center; gap:26px; color:var(--muted); font-size:13px; }
+    .nav-links a:hover { color:var(--text); }
+    .nav-actions { display:flex; gap:10px; align-items:center; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--line); padding:10px 15px; border-radius:11px; color:var(--text); background:rgba(255,255,255,.035); font-size:13px; font-weight:650; cursor:pointer; transition:.2s ease; }
+    .btn:hover { transform:translateY(-1px); border-color:rgba(84,215,238,.55); }
+    .btn.primary { color:#06121d; border-color:transparent; background:linear-gradient(110deg,var(--cyan),#91ecdf); box-shadow:0 8px 26px rgba(84,215,238,.16); }
+    .hero { display:grid; grid-template-columns:1.02fr .98fr; gap:54px; align-items:center; padding:78px 0 56px; }
+    .eyebrow { display:inline-flex; align-items:center; gap:9px; color:var(--cyan); text-transform:uppercase; letter-spacing:.16em; font-size:10px; font-weight:800; }
+    .dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 14px var(--green); }
+    h1 { margin:18px 0 16px; max-width:650px; font-size:clamp(42px,5.6vw,68px); line-height:1.02; letter-spacing:-.065em; }
+    h1 span { color:var(--cyan); }
+    .lead { max-width:600px; color:#a9bad0; font-size:16px; line-height:1.8; }
+    .hero-cta { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; }
+    .hero-meta { display:flex; gap:22px; flex-wrap:wrap; margin-top:28px; color:var(--muted); font-size:11px; }
+    .hero-meta strong { color:var(--text); font-weight:700; }
+    .visual-shell { position:relative; border:1px solid rgba(126,170,218,.2); border-radius:23px; background:linear-gradient(145deg,rgba(21,39,63,.95),rgba(10,19,34,.97)); padding:18px; box-shadow:var(--shadow); overflow:hidden; }
+    .visual-shell:before { content:""; position:absolute; inset:0 0 auto; height:1px; background:linear-gradient(90deg,transparent,var(--cyan),transparent); opacity:.7; }
+    .visual-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; color:var(--muted); font-size:10px; letter-spacing:.12em; text-transform:uppercase; }
+    .visual-status { color:var(--green); display:flex; gap:7px; align-items:center; letter-spacing:.08em; }
+    .topology { display:grid; grid-template-columns:1fr 76px 1fr; gap:10px; align-items:center; min-height:220px; }
+    .proxy-node { padding:20px 12px; text-align:center; border:1px solid rgba(84,215,238,.35); border-radius:15px; background:rgba(84,215,238,.08); }
+    .node-icon { width:42px; height:42px; margin:0 auto 12px; display:grid; place-items:center; border-radius:13px; color:var(--cyan); background:rgba(84,215,238,.13); font-size:21px; }
+    .node-title { font-size:13px; font-weight:750; }
+    .node-sub { color:var(--muted); font-size:10px; margin-top:4px; }
+    .connector { position:relative; height:2px; background:linear-gradient(90deg,var(--cyan),rgba(84,215,238,.1)); }
+    .connector:after { content:"›"; position:absolute; right:-2px; top:-13px; color:var(--cyan); font-size:24px; }
+    .backend-stack { display:grid; gap:9px; }
+    .mini-backend { display:flex; align-items:center; gap:9px; padding:10px 11px; border:1px solid var(--line); border-radius:11px; background:rgba(255,255,255,.025); }
+    .mini-dot { width:7px; height:7px; border-radius:50%; background:var(--green); flex:none; }
+    .mini-backend b { display:block; font-size:10px; }
+    .mini-backend small { display:block; color:var(--muted); font-size:9px; }
+    .mini-backend.offline .mini-dot { background:var(--red); }
+    .visual-foot { display:flex; justify-content:space-between; border-top:1px solid var(--line); padding-top:13px; margin-top:10px; color:var(--muted); font-size:10px; }
+    .visual-foot strong { color:var(--cyan); }
+    .section { padding:52px 0; }
+    .section-head { max-width:650px; margin-bottom:24px; }
+    .section-kicker { color:var(--cyan); font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.16em; }
+    h2 { margin:9px 0 9px; font-size:clamp(26px,3vw,36px); line-height:1.15; letter-spacing:-.04em; }
+    .section-desc { margin:0; color:var(--muted); max-width:670px; }
+    .sim-layout { display:grid; grid-template-columns:1.25fr .75fr; gap:17px; align-items:stretch; }
+    .card { border:1px solid var(--line); border-radius:var(--radius); background:linear-gradient(150deg,rgba(18,31,51,.96),rgba(13,23,39,.96)); box-shadow:0 12px 38px rgba(0,0,0,.13); }
+    .sim-card { padding:20px; }
+    .card-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:16px; }
+    .card-heading h3 { margin:0; font-size:15px; letter-spacing:-.02em; }
+    .card-heading p { margin:4px 0 0; color:var(--muted); font-size:11px; }
+    .tag { display:inline-flex; align-items:center; padding:5px 9px; border:1px solid rgba(243,189,103,.3); border-radius:20px; color:var(--amber); background:rgba(243,189,103,.07); font-size:9px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; white-space:nowrap; }
+    .sim-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-bottom:15px; }
+    .sim-toolbar label { color:var(--muted); font-size:11px; }
+    select { color:var(--text); background:#0b1524; border:1px solid var(--line); padding:8px 10px; border-radius:9px; font-size:11px; }
+    .sim-toolbar .btn { padding:8px 12px; font-size:11px; }
+    .backend-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+    .backend-card { padding:13px; border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.025); min-width:0; transition:.2s; }
+    .backend-card.selected { border-color:rgba(84,215,238,.7); box-shadow:inset 0 0 0 1px rgba(84,215,238,.12); }
+    .backend-card.down { opacity:.65; }
+    .backend-head { display:flex; justify-content:space-between; gap:6px; align-items:center; }
+    .backend-name { font-size:11px; font-weight:750; }
+    .health-pill { font-size:9px; font-weight:750; color:var(--green); }
+    .down .health-pill { color:var(--red); }
+    .backend-port { margin:5px 0 13px; color:var(--muted); font:10px ui-monospace,monospace; }
+    .backend-stats { display:flex; justify-content:space-between; gap:5px; padding-top:9px; border-top:1px solid var(--line); color:var(--muted); font-size:9px; }
+    .backend-stats strong { display:block; color:var(--text); font:700 14px ui-monospace,monospace; }
+    .toggle-link { margin-top:10px; padding:0; border:0; background:none; color:var(--cyan); cursor:pointer; font-size:10px; }
+    .sim-note { display:flex; gap:9px; align-items:flex-start; margin-top:14px; color:var(--muted); font-size:10px; }
+    .sim-note strong { color:var(--amber); }
+    .side-stats { display:grid; grid-template-rows:repeat(3,1fr); gap:10px; }
+    .stat { padding:16px 18px; }
+    .stat-label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.1em; }
+    .stat-value { font-size:27px; letter-spacing:-.05em; font-weight:750; margin-top:4px; }
+    .stat-sub { color:var(--muted); font-size:10px; margin-top:2px; }
+    .route-log { padding:17px 18px; }
+    .route-log .stat-label { margin-bottom:9px; }
+    #lastRoute { color:var(--cyan); font:12px ui-monospace,monospace; min-height:20px; }
+    .architecture { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+    .step { padding:18px; position:relative; overflow:hidden; }
+    .step-num { color:var(--cyan); font:700 11px ui-monospace,monospace; letter-spacing:.1em; }
+    .step h3 { margin:13px 0 7px; font-size:14px; }
+    .step p { margin:0; color:var(--muted); font-size:11px; line-height:1.7; }
+    .features { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .feature { padding:19px; }
+    .feature-icon { display:grid; place-items:center; width:35px; height:35px; border:1px solid rgba(84,215,238,.22); background:rgba(84,215,238,.07); color:var(--cyan); border-radius:10px; font-size:17px; }
+    .feature h3 { margin:13px 0 6px; font-size:13px; }
+    .feature p { margin:0; color:var(--muted); font-size:11px; line-height:1.7; }
+    .stack { display:flex; flex-wrap:wrap; gap:8px; }
+    .stack span { border:1px solid var(--line); background:rgba(255,255,255,.035); color:#c5d5e8; padding:8px 12px; border-radius:9px; font-size:11px; }
+    .runtime { display:grid; grid-template-columns:1fr 1fr; gap:18px; padding:24px; align-items:center; }
+    .runtime p { color:var(--muted); font-size:12px; }
+    .code { padding:15px 17px; border:1px solid var(--line); border-radius:13px; background:#08111e; color:#bfe8ef; overflow:auto; font:11px/1.9 ui-monospace,monospace; }
+    .code .comment { color:#7188a4; }
+    footer { margin-top:50px; border-top:1px solid var(--line); padding:23px 0 35px; display:flex; align-items:center; justify-content:space-between; gap:16px; color:var(--muted); font-size:10px; }
+    footer a { color:var(--cyan); }
+    @media (max-width: 900px) {
+      .hero { grid-template-columns:1fr; gap:30px; padding-top:56px; }
+      .visual-shell { max-width:650px; width:100%; }
+      .architecture { grid-template-columns:repeat(2,1fr); }
+      .sim-layout { grid-template-columns:1fr; }
+      .side-stats { grid-template-columns:repeat(3,1fr); grid-template-rows:auto; }
+    }
+    @media (max-width: 620px) {
+      .wrap { width:min(100% - 28px,1160px); }
+      .nav { min-height:66px; }
+      .nav-links { display:none; }
+      .nav-actions .btn { padding:8px 10px; font-size:11px; }
+      .hero { padding:45px 0 35px; }
+      h1 { font-size:43px; }
+      .lead { font-size:14px; }
+      .topology { grid-template-columns:1fr 42px 1fr; gap:6px; }
+      .proxy-node { padding:13px 5px; }
+      .mini-backend { padding:8px 6px; }
+      .mini-backend small { font-size:8px; }
+      .backend-grid, .features { grid-template-columns:1fr; }
+      .side-stats { grid-template-columns:1fr; }
+      .architecture { grid-template-columns:1fr; }
+      .runtime { grid-template-columns:1fr; padding:18px; }
+      footer { flex-direction:column; align-items:flex-start; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior:auto !important; transition:none !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="wrap nav">
+    <a class="brand" href="#top" aria-label="EdgeMesh-C home">
+      <span class="brand-mark">⌘</span>
+      <span>EdgeMesh-C<small>PACKETPULSE TEAM</small></span>
+    </a>
+    <nav class="nav-links" aria-label="Main navigation">
+      <a href="#simulator">Preview</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#run">Run locally</a>
+    </nav>
+    <div class="nav-actions">
+      <a class="btn" href="https://www.figma.com/design/cGO3ieo6621gyju6N7yZ2s/edgemesh-c" target="_blank" rel="noreferrer">Design ↗</a>
+      <a class="btn primary" href="https://github.com/ESpoorthy/EdgeMesh-C" target="_blank" rel="noreferrer">View source ↗</a>
+    </div>
+  </header>
+
+  <main id="top" class="wrap">
+    <section class="hero">
+      <div>
+        <div class="eyebrow"><span class="dot"></span> Computer Networks · Systems Project</div>
+        <h1>Resilient routing.<br /><span>At the edge.</span></h1>
+        <p class="lead">A lightweight HTTP reverse proxy and load balancer built in C17. EdgeMesh-C distributes requests across backend services, monitors their health, and routes around failures—with a dashboard for visibility into the system.</p>
+        <div class="hero-cta">
+          <a class="btn primary" href="#simulator">Explore the preview ↓</a>
+          <a class="btn" href="https://github.com/ESpoorthy/EdgeMesh-C" target="_blank" rel="noreferrer">Explore GitHub ↗</a>
+        </div>
+        <div class="hero-meta">
+          <span><strong>C17</strong> · POSIX sockets</span>
+          <span><strong>2</strong> routing policies</span>
+          <span><strong>3</strong> demo backends</span>
+        </div>
+      </div>
+
+      <div class="visual-shell" aria-label="Illustration of a proxy connected to three backend servers">
+        <div class="visual-top"><span>Network topology</span><span class="visual-status"><span class="dot"></span> SIMULATED VIEW</span></div>
+        <div class="topology">
+          <div class="proxy-node">
+            <div class="node-icon">⇄</div>
+            <div class="node-title">EdgeMesh Proxy</div>
+            <div class="node-sub">127.0.0.1:8080</div>
+          </div>
+          <div class="connector" aria-hidden="true"></div>
+          <div class="backend-stack">
+            <div class="mini-backend"><span class="mini-dot"></span><span><b>Backend 01</b><small>127.0.0.1:9001</small></span></div>
+            <div class="mini-backend"><span class="mini-dot"></span><span><b>Backend 02</b><small>127.0.0.1:9002</small></span></div>
+            <div class="mini-backend"><span class="mini-dot"></span><span><b>Backend 03</b><small>127.0.0.1:9003</small></span></div>
+          </div>
+        </div>
+        <div class="visual-foot"><span>Routing engine</span><strong>ROUND ROBIN / LEAST CONNECTIONS</strong></div>
+      </div>
+    </section>
+
+    <section id="simulator" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Interactive preview</div>
+        <h2>See routing decisions in motion.</h2>
+        <p class="section-desc">Switch policies, send sample requests, and take a backend offline to explore how a resilient routing pool behaves.</p>
+      </div>
+      <div class="sim-layout">
+        <div class="card sim-card">
+          <div class="card-heading">
+            <div><h3>Backend pool</h3><p>Three local nodes · simulated browser preview</p></div>
+            <span class="tag">Illustrative simulation</span>
+          </div>
+          <div class="sim-toolbar">
+            <label for="policy">Routing policy</label>
+            <select id="policy">
+              <option value="round_robin">Round Robin</option>
+              <option value="least_connections">Least Connections</option>
+            </select>
+            <button class="btn primary" id="routeBtn" type="button">↗ Route request</button>
+            <button class="btn" id="resetBtn" type="button">Reset</button>
+          </div>
+          <div class="backend-grid" id="backendGrid" aria-live="polite"></div>
+          <div class="sim-note"><span>ⓘ</span><span><strong>Preview only:</strong> these interactions run in your browser and do not contact the C proxy. Live health, routing and metrics require the local EdgeMesh-C runtime.</span></div>
+        </div>
+        <div class="side-stats">
+          <div class="card stat"><div class="stat-label">Requests routed</div><div class="stat-value" id="totalRequests">0</div><div class="stat-sub">In this browser session</div></div>
+          <div class="card stat"><div class="stat-label">Available backends</div><div class="stat-value" id="availableBackends">3 / 3</div><div class="stat-sub">Eligible for simulated routing</div></div>
+          <div class="card route-log"><div class="stat-label">Latest routing decision</div><div id="lastRoute">Waiting for a request…</div><div class="stat-sub" id="routePolicyLabel">Round Robin policy</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="architecture" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Request lifecycle</div>
+        <h2>From incoming request to healthy backend.</h2>
+        <p class="section-desc">A compact networking pipeline with bounded request handling and explicit failure paths.</p>
+      </div>
+      <div class="architecture">
+        <article class="card step"><div class="step-num">01 / INGRESS</div><h3>Accept & validate</h3><p>The proxy accepts a client connection and parses the supported HTTP/1.1 GET request subset.</p></article>
+        <article class="card step"><div class="step-num">02 / SELECT</div><h3>Choose a route</h3><p>Round Robin or Least Connections selects an eligible backend from the configured pool.</p></article>
+        <article class="card step"><div class="step-num">03 / FORWARD</div><h3>Forward & observe</h3><p>The proxy forwards the request and records request outcomes, timing and traffic metrics.</p></article>
+        <article class="card step"><div class="step-num">04 / RECOVER</div><h3>Detect & fail over</h3><p>Health checks track backend availability so unhealthy nodes can be excluded from routing.</p></article>
+      </div>
+    </section>
+
+    <section id="capabilities" class="section">
+      <div class="section-head">
+        <div class="section-kicker">Core capabilities</div>
+        <h2>Built around visibility and resilience.</h2>
+      </div>
+      <div class="features">
+        <article class="card feature"><div class="feature-icon">⇄</div><h3>Load balancing</h3><p>Compare Round Robin and Least Connections request-selection strategies across a backend pool.</p></article>
+        <article class="card feature"><div class="feature-icon">♡</div><h3>Backend health</h3><p>Track backend health state and prevent unhealthy nodes from receiving new traffic.</p></article>
+        <article class="card feature"><div class="feature-icon">↗</div><h3>Automatic failover</h3><p>Attempt eligible alternate backends when an upstream failure occurs within the supported retry rules.</p></article>
+        <article class="card feature"><div class="feature-icon">◷</div><h3>Traffic metrics</h3><p>Collect request rates, response outcomes, latency observations and backend-level activity.</p></article>
+        <article class="card feature"><div class="feature-icon">⌘</div><h3>Admin API</h3><p>Expose health, overview, backends, routing policy, metrics and latest benchmark information.</p></article>
+        <article class="card feature"><div class="feature-icon">▤</div><h3>Dashboard & benchmark</h3><p>Use the React dashboard for observability and a C benchmark client for repeatable local tests.</p></article>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div class="section-kicker">Technology</div>
+        <h2>Small footprint. Systems-first engineering.</h2>
+        <p class="section-desc">The networking engine is written in C, with a separate web interface for monitoring and visualisation.</p>
+      </div>
+      <div class="stack">
+        <span>C17</span><span>POSIX / BSD sockets</span><span>pthreads</span><span>CMake</span><span>CTest</span><span>HTTP/1.1 subset</span><span>React</span><span>TypeScript</span><span>Vite</span><span>GitHub Actions</span>
+      </div>
+    </section>
+
+    <section id="run" class="section">
+      <div class="card runtime">
+        <div>
+          <div class="section-kicker">Run the real system</div>
+          <h2>Take the preview to your terminal.</h2>
+          <p>GitHub Pages hosts this static project showcase. The C proxy, admin API, demo backends and live dashboard run locally; they are not executed by GitHub Pages.</p>
+          <a class="btn primary" href="https://github.com/ESpoorthy/EdgeMesh-C#readme" target="_blank" rel="noreferrer">Build & run instructions ↗</a>
+        </div>
+        <div class="code"><span class="comment"># Build the C engine</span><br />cmake -S . -B build<br />cmake --build build --parallel<br /><br /><span class="comment"># Start three demo backends</span><br />./build/demo_backend 9001 &amp;<br />./build/demo_backend 9002 &amp;<br />./build/demo_backend 9003 &amp;<br /><br /><span class="comment"># Start proxy + admin API</span><br />./build/edgemesh</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <span>© <span id="year"></span> PacketPulse · EdgeMesh-C · Computer Networks Project</span>
+    <span><a href="https://github.com/ESpoorthy/EdgeMesh-C" target="_blank" rel="noreferrer">GitHub repository ↗</a> &nbsp;·&nbsp; <a href="https://www.figma.com/design/cGO3ieo6621gyju6N7yZ2s/edgemesh-c" target="_blank" rel="noreferrer">Figma design ↗</a></span>
+  </footer>
+
+  <script>
+    const initialNodes = () => [
+      { id: 'Backend 01', port: 9001, online: true, active: 1, requests: 0 },
+      { id: 'Backend 02', port: 9002, online: true, active: 2, requests: 0 },
+      { id: 'Backend 03', port: 9003, online: true, active: 1, requests: 0 }
+    ];
+    let nodes = initialNodes();
+    let total = 0;
+    let rrCursor = 0;
+    let lastSelected = -1;
+    let releaseTimers = [];
+    const grid = document.getElementById('backendGrid');
+    const policySelect = document.getElementById('policy');
+
+    function render() {
+      grid.innerHTML = nodes.map((node, index) => {
+        const state = node.online ? 'HEALTHY' : 'OFFLINE';
+        return `<article class="backend-card ${node.online ? '' : 'down'} ${index === lastSelected ? 'selected' : ''}">
+          <div class="backend-head"><span class="backend-name">${node.id}</span><span class="health-pill">${state}</span></div>
+          <div class="backend-port">127.0.0.1:${node.port}</div>
+          <div class="backend-stats"><span>In flight<strong>${node.active}</strong></span><span>Routed<strong>${node.requests}</strong></span></div>
+          <button class="toggle-link" type="button" data-node="${index}">${node.online ? 'Take offline −' : 'Restore backend +'}</button>
+        </article>`;
+      }).join('');
+      document.getElementById('totalRequests').textContent = total.toLocaleString();
+      const available = nodes.filter(n => n.online).length;
+      document.getElementById('availableBackends').textContent = `${available} / 3`;
+      document.getElementById('routePolicyLabel').textContent = policySelect.value === 'round_robin' ? 'Round Robin policy' : 'Least Connections policy';
+      grid.querySelectorAll('button[data-node]').forEach(button => {
+        button.addEventListener('click', () => {
+          const index = Number(button.getAttribute('data-node'));
+          nodes[index].online = !nodes[index].online;
+          if (!nodes[index].online) nodes[index].active = 0;
+          lastSelected = -1;
+          render();
+        });
+      });
+    }
+
+    function chooseBackend() {
+      const eligible = nodes.map((node, index) => ({ node, index })).filter(item => item.node.online);
+      if (!eligible.length) return -1;
+      if (policySelect.value === 'round_robin') {
+        for (let step = 0; step < nodes.length; step += 1) {
+          const candidate = (rrCursor + step) % nodes.length;
+          if (nodes[candidate].online) {
+            rrCursor = (candidate + 1) % nodes.length;
+            return candidate;
+          }
+        }
+      }
+      const minimum = Math.min(...eligible.map(item => item.node.active));
+      const tied = eligible.filter(item => item.node.active === minimum);
+      const next = tied.find(item => item.index > lastSelected) || tied[0];
+      return next.index;
+    }
+
+    function routeRequest() {
+      const selected = chooseBackend();
+      if (selected < 0) {
+        document.getElementById('lastRoute').textContent = 'No healthy backend available';
+        return;
+      }
+      total += 1;
+      lastSelected = selected;
+      nodes[selected].requests += 1;
+      nodes[selected].active += 1;
+      document.getElementById('lastRoute').textContent = `#${total} → ${nodes[selected].id}`;
+      const timer = window.setTimeout(() => {
+        nodes[selected].active = Math.max(0, nodes[selected].active - 1);
+        render();
+      }, 900);
+      releaseTimers.push(timer);
+      render();
+    }
+
+    function resetSimulation() {
+      releaseTimers.forEach(window.clearTimeout);
+      releaseTimers = [];
+      nodes = initialNodes();
+      total = 0;
+      rrCursor = 0;
+      lastSelected = -1;
+      document.getElementById('lastRoute').textContent = 'Waiting for a request…';
+      policySelect.value = 'round_robin';
+      render();
+    }
+
+    document.getElementById('routeBtn').addEventListener('click', routeRequest);
+    document.getElementById('resetBtn').addEventListener('click', resetSimulation);
+    policySelect.addEventListener('change', render);
+    document.getElementById('year').textContent = new Date().getFullYear();
+    render();
+  </script>
+</body>
+</html>
